@@ -1,0 +1,124 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,Rmd
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.4.1
+  kernelspec:
+    display_name: R
+    language: R
+    name: ir
+---
+
+# Bayesian network structure from database
+
+
+Bayesian networks are networks that can provide insight into probabilistic dependencies that exist among variables in a dataset. In particular we focus on using a Bayesian belief network as a model of probabilistic dependency.
+
+A Bayesian belief-network $B_S$ is a directed acyclic graph in which nodes represent domain variables and the links represent probabilistic dependencies. Variables can be discrete of continuous, but in this work we will focus on discrete variables. 
+
+A Bayesian belief structure , $B_S$ is augmented by conditional probabilities, $B_P$, to form a Bayesian belief network $B=(B_S, B_P)$. For each node $x_i$ there is a conditional probability function that relates the node to its immediate predecessor, called parents and denoted with $\pi_i$. If a node has no parents a prior probability $P(x_i)$ is specified.
+
+The key feature of belief networks is their explicit representation of the conditional indipendence and dependence among events. In particular the joint probability of any instantiation of all $n$ variables in a belief network can be calculated as follows:
+$$
+P(X_1, \ldots,X_n)=\prod_{i=1}^n P(X_i|\pi_i)
+$$
+where $X_i$ represent the instantiation of the variable $x_i$ and the $\pi_i$ are the parents of $x_i$.
+
+## The basic model
+Let $D$ be a database of cases, $Z$ be the set of variables represented by $D$ and $B_{S_i}$, $B_{S_j}$ be two belief networks structures containing exactly those variables that are in Z. Then:
+$$
+\frac{P(B_{S_i}|D)}{P(B_{S_j}|D)}\stackrel{prod-rule}{=}\frac{P(B_{S_i},D)}{P(B_{S_j},D)}
+$$
+We now make some assumptions for computing $P(B_S,D)$ efficiently:
+\begin{enumerate}
+\item \textbf{ The database variables, which we denote with $Z$, are discrete}. We thus have:
+$$
+P(B_S, D)=\int_{B_P}P(D|B_s,B_P)f(B_P|B_S)P(B_S)dB_P
+\label{discr}
+$$
+where $B_P$ is a vector which denotes the conditional probability assignments associated with belief network structure $B_S$, and $f$ is the conditional probability density function over $B_P$ given $B_S$.
+\item \textbf{ Cases occur indelendently, given a belief network model}. The Eq \ref{discr} becomes:
+$$
+P(B_S, D)=\int_{B_P}\left[\prod_{h=1}^mP(C_h|B_S,B_P)\right]f(B_P|B_S)P(B_S)dB_P
+$$
+where $m$ is the number of cases in $D$ and $C_h$ is the $h$-th case in $D$.
+\item \textbf{ There are no cases that have variables with missing values.}
+\item \textbf{ The density function $f(B_P|B_S)$ is uniform.}
+\end{enumerate}
+We now denote with $w_{ij}$ the $j$-th of $q_i$ unique instantiations of the values of the variables in $\pi_i$, relative to the ordering of the cases in $D$. We then define $v_{ik}$ the $k$-th of the $r_i$ possible instantiations of the variable $x_i$ in $Z$. We lastly define $N_{ijk}$ as the number of casas in $D$ in which the variable $x_i$ has value $v_{ik}$ and $\pi_i$ is instantiated as $w_{ij}$.
+Calling:
+\begin{equation*}
+N_{ij}=\sum_{k=1}^{r_i}N_{ijk}
+\end{equation*}
+we finally get:
+$$
+P(B_S,D)=P(B_S)\prod_{i=1}^n\prod_{j=1}^{q_i} \frac{(r_i-1)!}{(N_{ij}+r_i-1)!}\prod_{k=1}^{r_i}N_{ijk}!
+$$
+
+Once we have $P(B,D)$ it is easy to find the conditional probability. Let $Q$ be the set of all those belief-network structures that contain just the variables in set $Z$, then:
+$$
+P(B_{S_i}|D)=\frac{P(B_{S_i},D)}{\sum_{B_S\in Q}P(B_S,D)}
+$$
+
+We can also look at smaller part of the network. Let $G$ be a belief network structure, such that the variables in G are a subset of those in $Z$. Let $R$ be the set of those structures in $Q$ that contains $G$ as a subgraph. Then:
+$$
+P(G|D)=\frac{\sum_{B_S\in R}P(B_S,D)}{\sum_{B_S\in Q}P(B_S,D)}
+$$
+
+## K2 algorithm
+However the size and the computational time of finding the structure of a belief network increase exponentially with $n$. So an exact method is not possible: we will apply a greedy search algorithm known as K2. This algorithm begins by making the assumption that a node has no parents. and then adds incrementally that parent whose addition most increase the probability of the resulting structure. We stop the procedure when the addition of no single parent does not increase further the probability.
+We define:
+$$
+g(i,\pi_i)=\prod_{j=1}^{q_i} \frac{(r_i-1)!}{(N_{ij}+r_i-1)!}\prod_{k=1}^{r_i}N_{ijk}!
+$$
+We also define the function Pred($x_i$) which returns the set of nodes that precede $x_i$ in the node ordering. We thus have the procedure:
+\begin{enumerate}
+\item *Input*: a set of $n$ nodes, an ordering of the nodes, an upper bound $u$ to the number of parents a node may have and a database $D$ containing $m$ cases.
+\item *Output*: For each node a printout of the parents of the node.
+\end{enumerate}
+
+```{r}
+# Pseudocode, not to run
+for(i in 1:n){  # Cycle over the nodes
+    pi.i <- c() # Empty vector
+    p.old <- g(i, pi.i) # Function defined above
+    OKtoGO <- TRUE
+    
+    while(OKtoGO & length(pi.i)<u ){
+        # let z be the node in Pred(x_i)-pi.i that maximizes g(i, pi.i U {z} )
+        z <- which.max( g(i, c(pi.i, pred(x_i)) ) )
+        p.new <- g(i, pi.i)
+        
+        if(p.new >p.old){ # The new configuration is more probable
+            p.old <- p.new
+            pi.i <- c(pi.i, z) # New parents adding z
+        }
+        else{  OKtoGO <- FALSE }
+        
+    }
+    cat('Node:', x.i, ' Parents of this node:', pi.i)
+}
+```
+
+## Missing data
+still to write (and understand) it
+
+```{r}
+# data. x1, x2, x3 are binary variables and we indicate with 0 "absent"
+# and with 1 "present"
+case <- c(1:10)
+x1 <- c(1, 1, 0, 1, 0, 0, 1, 0, 1, 0)
+x2 <- c(0, 1, 0, 1, 0, 1, 1, 0, 1, 0)
+x3 <- c(0, 1, 1, 1, 0, 1, 1, 0, 1, 0)
+df <- data.frame(case, x1, x2, x3)
+```
+
+Introduction of the notation used for the K2 algorithm
+
+```{r}
+
+```
