@@ -104,9 +104,6 @@ for(i in 1:n){  # Cycle over the nodes
 }
 ```
 
-## Missing data
-still to write (and understand) it
-
 ```{r}
 # data. x1, x2, x3 are binary variables and we indicate with 0 "absent"
 # and with 1 "present"
@@ -116,6 +113,76 @@ x2 <- c(0, 1, 0, 1, 0, 1, 1, 0, 1, 0)
 x3 <- c(0, 1, 1, 1, 0, 1, 1, 0, 1, 0)
 df <- data.frame(case, x1, x2, x3)
 ```
+
+```{r}
+inputs <- function(df, order ){
+    # df: a dataframe formatted with the first column as the number of 
+    # cases and the others the data. Each column is relative to a variable, i.e. node.
+    # u: the max number of parents a node can have.
+    # order: list containing the ordering of the nodes. If not specified it is assumed 
+    # that node i has as preceding nodes all the 1, ..., i-1 nodes
+    
+    n <- ncol(df)-1    # Number of nodes n
+    m <- nrow(df)      # Number of cases m
+    v <- t( apply( data.matrix(df[-1]), 2, unique) ) # possible instantiatios values v
+    r <- apply(w, 1, length) # Number of possible instantiations r
+    
+    if( length(order) == 0){ # Imposing the normal ordering
+        for(i in 1:n){
+            tresh <- min(i-1, 1)
+            order[[i]] <- c((i-1):tresh )
+        } 
+    }
+    
+    out <- list(order, n, m, v, r)
+    return(out )
+}
+```
+
+```{r}
+log.g <- function(i, df, pi, w, r){
+    r.i <- r[i]
+    q.i <- 2^(length(pi))  # This is valid for binary variables     
+    
+}
+
+K2 <- function(df, u, order=list() ){
+    inp <- inputs(df, order=order)
+    # Rearranging outputs
+    order <- inp[[1]]
+    n <- inp[[2]]
+    m <- inp[[3]]
+    v <- inp[[4]]
+    r <- inp[[5]]
+    
+    pi <- list() # list of parents
+    
+    for(i in 1:n){
+       pi[[i]] <- c() 
+       p.old <- g(i, df, pi[[i]], w, r)
+       OKtoGO <- TRUE
+        
+       while(OKtoGO & length(pi[[i]])<u ){
+       # let z be the node in Pred(x_i)-pi.i that maximizes g(i, pi.i U {z} )
+           
+           p.new <- g(i, c(pi[[i]], z) )
+        
+           if(p.new >p.old){ # The new configuration is more probable
+               p.old <- p.new
+               pi[[i]] <- c(pi[[i]], z) # New parents adding z
+           }
+           else{  OKtoGO <- FALSE }
+        
+       }
+       cat('Node:', i, ' Parents of this node:', pi[[i]])
+    }
+    
+}
+```
+
+## Missing data
+still to write (and understand) it
+
 
 Introduction of the notation used for the K2 algorithm
 
