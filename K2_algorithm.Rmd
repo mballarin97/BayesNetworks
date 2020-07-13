@@ -6,7 +6,7 @@ jupyter:
       extension: .Rmd
       format_name: rmarkdown
       format_version: '1.2'
-      jupytext_version: 1.4.1
+      jupytext_version: 1.3.2
   kernelspec:
     display_name: R
     language: R
@@ -107,85 +107,184 @@ for(i in 1:n){  # Cycle over the nodes
 ```{r}
 # data. x1, x2, x3 are binary variables and we indicate with 0 "absent"
 # and with 1 "present"
-case <- c(1:10)
 x1 <- c(1, 1, 0, 1, 0, 0, 1, 0, 1, 0)
 x2 <- c(0, 1, 0, 1, 0, 1, 1, 0, 1, 0)
 x3 <- c(0, 1, 1, 1, 0, 1, 1, 0, 1, 0)
-df <- data.frame(case, x1, x2, x3)
+df <- data.frame(x1, x2, x3)
+```
+
+$$ f(i, \pi_i) = \prod_{j=1}^{q_i} \frac{(r_i - 1)!}{(N_{ij} + r_i - 1)!} \prod_{k=1}^{r_i} N_{ijk}! $$
+
+
+$$ \log f(i, \pi_i) = \sum_{j=1}^{q_i} \Big[ \log (r_i - 1)! - \log (N_{ij} + r_i - 1)!  + \sum_{k=1}^{r_i} \log N_{ijk}! \Big]$$
+
+```{r}
+#Precompute all needed factorials (1 to m + r -1)
+n <- ncol(df)
+m <- nrow(df)
+r <- 2 #number of possible values
+
+factorials <- c(1, 1:(m+r-1))
+
+for (i in 4:length(factorials)) { #first 3 are already correct
+    factorials[i] <- factorials[i] * factorials[i-1]
+}
+
+factorials <- log(factorials)
 ```
 
 ```{r}
-inputs <- function(df, order ){
-    # df: a dataframe formatted with the first column as the number of 
-    # cases and the others the data. Each column is relative to a variable, i.e. node.
-    # u: the max number of parents a node can have.
-    # order: list containing the ordering of the nodes. If not specified it is assumed 
-    # that node i has as preceding nodes all the 1, ..., i-1 nodes
+f <- function(index, parents, database) {
     
-    n <- ncol(df)-1    # Number of nodes n
-    m <- nrow(df)      # Number of cases m
-    v <- t( apply( data.matrix(df[-1]), 2, unique) ) # possible instantiatios values v
-    r <- apply(w, 1, length) # Number of possible instantiations r
+    #Compute N_{ijk}
+    p <- length(parents)
     
-    if( length(order) == 0){ # Imposing the normal ordering
-        for(i in 1:n){
-            tresh <- min(i-1, 1)
-            order[[i]] <- c((i-1):tresh )
-        } 
+    todec <- 2 ** (0:max(0,p-1)) # (2, 4, 8)
+    #(1, 2, 4, 8)
+    
+    qi <- 2**p #can be adapted to generic r
+    
+    N <- matrix(data = 0, nrow = qi, ncol = 2)
+    
+    
+    for (i in 1:nrow(database)) {
+        index.k <- database[i, index] + 1 #(0, 1) -> (1, 2)
+
+        
+        if (p > 0)
+            index.j <- sum(database[i, parents] * todec) + 1 # 10 -> 2
+        else 
+            index.j <- 1
+
+        N[index.j, index.k] <- N[index.j, index.k] + 1
     }
     
-    out <- list(order, n, m, v, r)
-    return(out )
+    #Compute N_{ij}
+    Nj <- rowSums(N) 
+    
+#     print(N)
+#     print(Nj)
+    
+    #Compute the log(factorials)
+    logN  <- matrix(data = factorials[N+1], ncol=2) #+1 because indices start from 1
+    
+#     print(logN)
+    
+    factor.first  <- factorials[2] #2-1+1
+    factor.second <- factorials[Nj+2] #+r_i -1 +1 (because of the indices) = +r_i = +2
+    factor.third  <- rowSums(logN)
+    
+#     print(factor.first)
+#     print(factor.second)
+#     print(factor.third)
+    
+    result <- exp(sum(factor.first - factor.second + factor.third)) #factor.first could be brought outside to gain precision (and multiply by qi)
+
+    return(result)
 }
+
+#0 is first, 1 is second
 ```
 
 ```{r}
-log.g <- function(i, df, pi, w, r){
-    r.i <- r[i]
-    q.i <- 2^(length(pi))  # This is valid for binary variables     
-    
-}
+a <- f(3, c(1,2), df) # [[3, 1], [0, 1], [1, 0], [0, 4]]
+```
 
-K2 <- function(df, u, order=list() ){
-    inp <- inputs(df, order=order)
-    # Rearranging outputs
-    order <- inp[[1]]
-    n <- inp[[2]]
-    m <- inp[[3]]
-    v <- inp[[4]]
-    r <- inp[[5]]
+```{r}
+ordering = c(1,2,3)
+ordering[1:(which(ordering == 3)-1)]
+```
+
+```{r}
+K2 <- function(database, u, ordering) {
+    # database : dataframe m x n, containing no missing values. Entries must be binary. (could be extended to integers 1 to r_i)
+    # u : maximum allowed number of parents for each node
+    # ordering : a vector containing a permutation of the first n integers
     
-    pi <- list() # list of parents
+    n <- ncol(database)
     
-    for(i in 1:n){
-       pi[[i]] <- c() 
-       p.old <- g(i, df, pi[[i]], w, r)
-       OKtoGO <- TRUE
+    structure <- matrix(data = 0, nrow = n, ncol = n)
+    
+    #structure[i,j] = 1 if j is a parent of i, 0 otherwise (it is not symmetric)
+    
+    for (i in 1:n) {
+        pi.i <- c()
         
-       while(OKtoGO & length(pi[[i]])<u ){
-       # let z be the node in Pred(x_i)-pi.i that maximizes g(i, pi.i U {z} )
-           
-           p.new <- g(i, c(pi[[i]], z) )
+        p.old <- f(i, pi.i, database)
         
-           if(p.new >p.old){ # The new configuration is more probable
-               p.old <- p.new
-               pi[[i]] <- c(pi[[i]], z) # New parents adding z
-           }
-           else{  OKtoGO <- FALSE }
+        OKToProceed <- TRUE
         
-       }
-       cat('Node:', i, ' Parents of this node:', pi[[i]])
+        while (OKToProceed & length(pi.i) < u) {
+            p.new <- 0
+            p.new.index <- NA
+            
+            #Compute possible parents of i
+            i.pos <- which(ordering == i) #Position of i in the ordering
+            if (i.pos == 1) {
+                break
+            } else {
+                precedents <- ordering[1:i.pos-1]
+            }
+            
+            for (j in precedents) {
+                # can it be vectorized?
+                fz <- f(i, c(pi.i, j), database)
+                if (fz > p.new) {
+                    p.new <- fz
+                    p.new.index <- j
+                }
+            }
+            
+            if (p.new > p.old) {
+                p.old <- p.new
+                pi.i <- c(pi.i, p.new.index)
+                structure[i, j] = 1
+            } else {
+                OKToProceed <- FALSE
+            }
+        
+        }
     }
     
+    return(structure)
+
 }
 ```
 
-## Missing data
-still to write (and understand) it
+```{r}
+#Print the structure
 
+structure <- K2(df, 3, c(1,2,3))
 
-Introduction of the notation used for the K2 algorithm
+print(structure)
+
+#Should be:
+# [0, 0, 0]
+# [1, 0, 0]
+# [0, 1, 0]
+
+for (i in 1:nrow(structure)) {
+    cat("Node ", i, " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(j)
+        }
+    }
+    
+    cat("]\n")
+}
+
+```
 
 ```{r}
+#TODO
+#---Coding---#
+#Evaluate the performance (timing)
+#Generalize to r cases
 
+#Bnstruct
+
+#---Writing---#
+#Write comments for everything
 ```
