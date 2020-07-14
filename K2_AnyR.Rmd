@@ -6,7 +6,7 @@ jupyter:
       extension: .Rmd
       format_name: rmarkdown
       format_version: '1.2'
-      jupytext_version: 1.5.1
+      jupytext_version: 1.4.1
   kernelspec:
     display_name: R
     language: R
@@ -119,18 +119,21 @@ $$ f(i, \pi_i) = \prod_{j=1}^{q_i} \frac{(r_i - 1)!}{(N_{ij} + r_i - 1)!} \prod_
 $$ \log f(i, \pi_i) = \sum_{j=1}^{q_i} \Big[ \log (r_i - 1)! - \log (N_{ij} + r_i - 1)!  + \sum_{k=1}^{r_i} \log N_{ijk}! \Big]$$
 
 ```{r}
+df
+```
+
+```{r}
 #Precompute all needed factorials (1 to m + r -1)
 n <- ncol(df)
 m <- nrow(df)
 r <- 2 #number of possible values
 
-factorials <- c(1, 1:(m+r-1))
+factorials <- log(c(1, 1:(m+r-1)))
 
 for (i in 4:length(factorials)) { #first 3 are already correct
-    factorials[i] <- factorials[i] * factorials[i-1]
+    factorials[i] <- factorials[i] + factorials[i-1]
 }
 
-factorials <- log(factorials)
 ```
 
 ```{r}
@@ -138,62 +141,54 @@ f <- function(index, parents, database) {
     
     #Compute N_{ijk}
     p <- length(parents)
-    
+    m <- nrow(database)
     todec <- r ** (0:max(0,p-1)) 
-    
     qi <- r**p #can be adapted to generic r
+    #print(t(todec))
+    #print(database[parents])
+    rowcol <- array(dim = m)
     
-    rowcol <- array(dim = nrow(database))
+    #for (i in 1:nrow(database)) {
+    index.k <- database[index] + 1 #(0, 1) -> (1, 2)
+
+    if (p > 0)
+        index.j <- as.matrix(database[parents])%*%todec + 1 # 10 -> 2
+    else 
+        index.j <- rep(1,m)
+
     
-    for (i in 1:nrow(database)) {
-        index.k <- database[i, index] + 1 #(0, 1) -> (1, 2)
-
-        if (p > 0)
-            index.j <- sum(database[i, parents] * todec) + 1 # 10 -> 2
-        else 
-            index.j <- 1
-
-        rowcol[i] <- paste(as.character(index.j),as.character(index.k), sep=".")
-    }
-    print(rowcol)
-    # Create Dataframe with Row, Column and Value
-    createN <- function(v){
-        nonzero <- unique(v)
-        val     <- apply(nonzero,1,function(a) sum(v==a))
-        row.pos <- apply(nonzero,1,function(a) as.integer(a))
-        col.pos <- apply(nonzero,1,function(a) as.integer(sapply(strsplit(a, "\\."), "[", 2)))
-                         
-        N <- data.frame('Row'=row.pos, 'Col'=col.pos, 'Value'=val)
-        return(N)
-    }
-    N <- createN(rowcol) 
-    print(N)           
+    indexes <- cbind(index.j, index.k) 
+    indexes <- indexes[ order(indexes[,1], indexes[,2]),  ]
+    
+    d <- abs( diff( as.matrix(indexes) ) )
+    d1 <- d[,1] + d[,2]
+    
+    idx.unique <- indexes[c(0,which(d1>0), length(d1)+1), ]
+    N_ijk <- diff( c(0,which(d1>0), length(d1)+1) )
+    
+    N <- data.frame('Row'=idx.unique[,1], 'Col'=idx.unique[,2], 'Value'=N_ijk)
+    
+    #print(N)           
     #Compute N_{ij}
-    Nj_star <- aggregate(.~Row,data=N,sum)[,c(1,3)]
-    Nj <- array(0, dim = qi)
-    Nj[Nj_star$Row] <- Nj_star$Value
+    Nj <- aggregate(.~Row,data=N,sum)[,c(3)]
+
     
     #Compute logN - already row summed
     N$Value <- factorials[N$Value+1]  
-    logN_star <- aggregate(.~Row,data=N,sum)[,c(1,3)]
-    logN <- array(0, dim = qi)
-    logN[logN_star$Row] <- logN_star$Value
+    logN <- aggregate(.~Row,data=N,sum)[,c(3)]
+    
 
     
     factor.first  <- factorials[r] #r_i-1+1
     factor.second <- factorials[Nj+r] #+r_i -1 +1 (because of the indices)
     factor.third  <- logN
 
-    result <- exp(sum(factor.first - factor.second + factor.third)) #factor.first could be brought outside to gain precision (and multiply by qi)
+    result <- sum(factor.first - factor.second + factor.third) #factor.first could be brought outside to gain precision (and multiply by qi)
 
     return(result)
 }
 
 #0 is first, 1 is second
-```
-
-```{r}
-f(3, c(1,2), df)
 ```
 
 ```{r}
@@ -215,30 +210,34 @@ K2 <- function(database, u, ordering) {
         
         OKToProceed <- TRUE
         
-        while (OKToProceed & length(pi.i) < u[i]) {
-            p.new <- 0
+        #Compute possible parents of i
+        i.pos <- which(ordering == i) #Position of i in the ordering
+        if (i.pos == 1) {
+            next 
+        } else {
+            precedents <- ordering[1:i.pos-1]
+        }
+        
+        while (OKToProceed & length(pi.i) < u) {
+            p.new <- -Inf
             p.new.index <- NA
             
-            #Compute possible parents of i
-            i.pos <- which(ordering == i) #Position of i in the ordering
-            if (i.pos == ordering[1]) {   #Generalization for different ordering
-                break
-            } else {
-                precedents <- ordering[1:i.pos-1]
-            }
             for (j in precedents) {
                 # can it be vectorized?
+                #cat('parents: ', c(pi.i, j), '\n')
                 fz <- f(i, c(pi.i, j), database)
+                #cat('i:', i, ' j:', j, ' fz:',fz, '\n' )
                 if (fz > p.new) {
                     p.new <- fz
                     p.new.index <- j
                 }
             }
-            
+            #cat(i, ' ', p.old, ' - ', p.new, '\n')
             if (p.new > p.old) {
                 p.old <- p.new
                 pi.i <- c(pi.i, p.new.index)
-                structure[i, j] = 1
+                structure[i, p.new.index] = 1
+                precedents <- precedents[-p.new.index]
             } else {
                 OKToProceed <- FALSE
             }
@@ -278,10 +277,145 @@ for (i in 1:nrow(structure)) {
 ```
 
 ```{r}
+library('bnlearn')
+library('bnstruct')
+```
+
+```{r}
+datab <- learning.test
+n <- ncol(datab)
+m <- nrow(datab)
+
+df <- matrix(data=0, nrow = m, ncol = n)
+one <- c('b')#, 'wide', 'high')
+two <- c('c')
+for( i in 1:m){
+    for(j in 1:n){
+        if(datab[i, j] %in% one) df[i,j] <- 1
+        if(datab[i, j] %in% two) df[i,j] <- 2
+        
+    }
+}
+df <- data.frame(df)
+m <- nrow(df)
+r <- 3 #number of possible values
+
+
+log.fact <- function(m, r){
+    # Return the logarithm of the first m+r-1 factorials
+    # m: int, number of cases in the dataset
+    # r: int, number of possible values a variable can assume
+    fact <- log( c(1, 1:(m+r-1)) )
+
+    for (i in 4:length(fact)) { #first 3 are already correct
+        fact[i] <- fact[i] + fact[i-1]
+    }
+    return(fact)
+}
+
+
+factorials <- log.fact(m, r)
+```
+
+```{r}
+#Print the structure
+
+structure <- K2(df, 3, c(1, 2, 3, 4, 6, 5))
+
+print(structure)
+
+for (i in 1:nrow(structure)) {
+    cat("Node ", i, " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(j)
+        }
+    }
+    cat("]\n")
+}
+```
+
+```{r}
+data.alarm <- data.frame(sapply(alarm, as.numeric)-1)
+
+m <- nrow(data.alarm)
+r <- 4
+
+factorials <- log.fact(m, r)
+```
+
+```{r}
+for(n in 1:length(al.name)){
+    cat(n, ':', al.name[n], ' ', sep='')
+}
+```
+
+```{r}
+order <- c(18, 20, 3, 9, 15, 23, 36, 21, 19, 17, 16, 30, 11, 35, 22, 29, 
+           2, 24, 0, 1, 27, 25, 12, 34, 14, 33, 31, 10, 32, 13, 26, 28, 6, 5, 7, 8, 4)+1
+
+structure <- K2(data.alarm, 4, order)
+
+print(structure)
+al.name <- colnames(data.alarm)
+for (i in 1:nrow(structure)) {
+    cat("Node ", al.name[i], " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(al.name[j], ' ')
+        }
+    }
+    cat("]\n")
+}
+```
+
+```{r}
+?cat
+```
+
+```{r}
+al_net <- load('alarm.rda')
+```
+
+```{r}
+names <- sapply(c(1:37), function(x) bn[[x]]$node )
+adj <- matrix( data=0, nrow=length(names), ncol=length(names))
+
+i <- 1
+for(n in bn){
+    par <- n$parents
+    for(p in par){
+        idx <- which( names==p )
+        print(idx)
+        adj[i, idx[1]] <- 1
+    }
+    i <- i+1
+}
+```
+
+```{r}
+
+```
+
+```{r}
+names
+```
+
+```{r}
+colnames(data.alarm)
+```
+
+```{r}
+c('HIST')
+```
+
+```{r}
 #TODO
 #---Coding---#
 #Evaluate the performance (timing)
-#Generalize to r cases
+
 
 #Bnstruct
 
