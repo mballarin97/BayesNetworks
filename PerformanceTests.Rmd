@@ -1,0 +1,202 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,Rmd
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.4.1
+  kernelspec:
+    display_name: R
+    language: R
+    name: ir
+---
+
+# Performance tests
+
+
+Here we try to understand the power of the K2 algorithm, tesiting its scaling with the data size and the network size. We will also look at the difference between K2 and other structural algorithms.
+
+This notebook requires the packages "bnstruct" and "bnlearn" <br>
+`install.packages('bnstruct')`
+`install.packages('bnlearn')`
+
+```{r}
+library('bnstruct')
+library('bnlearn')
+```
+
+```{r}
+f <- function(index, parents, database) {
+    
+    #Compute N_{ijk}
+    p <- length(parents)
+    
+    todec <- 2 ** (0:max(0,p-1)) # (2, 4, 8)
+    #(1, 2, 4, 8)
+    
+    qi <- 2**p #can be adapted to generic r
+    
+    N <- matrix(data = 0, nrow = qi, ncol = 2)
+    
+    
+    for (i in 1:nrow(database)) {
+        index.k <- database[i, index] + 1 #(0, 1) -> (1, 2)
+
+        
+        if (p > 0)
+            index.j <- sum(database[i, parents] * todec) + 1 # 10 -> 2
+        else 
+            index.j <- 1
+
+        N[index.j, index.k] <- N[index.j, index.k] + 1
+    }
+    
+    #Compute N_{ij}
+    Nj <- rowSums(N) 
+    
+#     print(N)
+#     print(Nj)
+    
+    #Compute the log(factorials)
+    logN  <- matrix(data = factorials[N+1], ncol=2) #+1 because indices start from 1
+    
+#     print(logN)
+    
+    factor.first  <- factorials[2] #2-1+1
+    factor.second <- factorials[Nj+2] #+r_i -1 +1 (because of the indices) = +r_i = +2
+    factor.third  <- rowSums(logN)
+    
+    result <- exp(sum(factor.first - factor.second + factor.third)) #factor.first could be brought outside to gain precision (and multiply by qi)
+
+    return(result)
+}
+
+#0 is first, 1 is second
+```
+
+```{r}
+K2 <- function(database, u, ordering) {
+    # database : dataframe m x n, containing no missing values. Entries must be binary. (could be extended to integers 1 to r_i)
+    # u : maximum allowed number of parents for each node
+    # ordering : a vector containing a permutation of the first n integers
+    
+    n <- ncol(database)
+    
+    structure <- matrix(data = 0, nrow = n, ncol = n)
+    
+    #structure[i,j] = 1 if j is a parent of i, 0 otherwise (it is not symmetric)
+    
+    for (i in 1:n) {
+        pi.i <- c()
+        
+        p.old <- f(i, pi.i, database)
+        
+        OKToProceed <- TRUE
+        
+        #Compute possible parents of i
+        i.pos <- which(ordering == i) #Position of i in the ordering
+        if (i.pos == 1) {
+            next 
+        } else {
+            precedents <- ordering[1:i.pos-1]
+        }
+        
+        while (OKToProceed & length(pi.i) < u) {
+            p.new <- 0
+            p.new.index <- NA
+            
+            cat(i,' - ', precedents, '\n')
+            for (j in precedents) { # 1-3
+                # can it be vectorized?
+                fz <- f(i, c(pi.i, j), database) 
+                if (fz > p.new) {
+                    p.new <- fz
+                    p.new.index <- j
+                }
+            }
+            cat(i, ' ', p.old, ' - ', p.new, '\n')
+            if (p.new > p.old) {
+                p.old <- p.new
+                pi.i <- c(pi.i, p.new.index)
+                cat('Taking ' , p.new.index, ' as parent of ', i, '\n')
+                structure[i, p.new.index] = 1
+                precedents <- precedents[-p.new.index]
+            } else {
+                OKToProceed <- FALSE
+            }
+        
+        }
+    }
+    
+    return(structure)
+
+}
+```
+
+```{r}
+datab <- lizard
+n <- ncol(datab)
+m <- nrow(datab)
+
+df <- matrix(data=0, nrow = m, ncol = n)
+one <- c('Sagrei', 'wide', 'high')
+for( i in 1:m){
+    for(j in 1:n){
+        if(datab[i, j] %in% one) df[i,j] <- 1
+        
+    }
+}
+df <- data.frame(df)
+```
+
+```{r}
+#Precompute all needed factorials (1 to m + r -1)
+n <- ncol(df)
+m <- nrow(df)
+r <- 2 #number of possible values
+
+
+log.fact <- function(m, r){
+    # Return the logarithm of the first m+r-1 factorials
+    # m: int, number of cases in the dataset
+    # r: int, number of possible values a variable can assume
+    fact <- log( c(1, 1:(m+r-1)) )
+
+    for (i in 4:length(fact)) { #first 3 are already correct
+        fact[i] <- fact[i] + fact[i-1]
+    }
+    return(fact)
+}
+
+
+factorials <- log.fact(m, 2)
+```
+
+```{r}
+#Print the structure
+
+structure <- K2(df[-6], 3, c(1,3,2 ))
+
+print(structure)
+
+for (i in 1:nrow(structure)) {
+    cat("Node ", i, " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(j)
+        }
+    }
+    cat("]\n")
+}
+```
+
+```{r}
+names
+```
+
+```{r}
+
+```
