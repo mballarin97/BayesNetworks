@@ -6,7 +6,7 @@ jupyter:
       extension: .Rmd
       format_name: rmarkdown
       format_version: '1.2'
-      jupytext_version: 1.3.2
+      jupytext_version: 1.4.1
   kernelspec:
     display_name: R
     language: R
@@ -81,13 +81,11 @@ We also define the function Pred($x_i$) which returns the set of nodes that prec
 
 ```{r}
 #Needed packages installation
-#install.packages("igraph")
 #install.packages("bnlearn")
 #install.packages("bnstruct")
 ```
 
 ```{r}
-library("igraph")
 library("bnlearn")
 library("bnstruct")
 ```
@@ -232,11 +230,64 @@ print(N)
 ```
 
 ```{r}
-f(3, c(2,1), df)
+f(3, c(1,2), df)
 ```
 
 ```{r}
-f(3, c(1,2), df)
+# Vectorization of the maximization over the possible parents of the probability
+
+# Creating a list of length 1 from the previous parents 
+i.par <-  list( i.parents ) 
+# Creating a list of length length(i.parents.candidates)
+i.cand <- as.list(i.parents.candidates)
+# Appending to each element of i.cand the list i.par, and so all the previous parents
+i.possible.parents <- mapply(append, i.cand, i.par, SIMPLIFY = FALSE)
+# Apply f over all possible parents and then making it a vector
+possible.funs <- unlist( lapply(i.possible.parents, f, index=i, database=df) )
+log.p.new <- max( possible.funs) # max value
+newparent.index <- which.max( possible.funs) # index of the max value
+```
+
+```{r}
+pred <- function(i, ordering){
+    # Parameters:
+    # - i: int
+    #    index of the variable of which we are searching the precedents
+    # - ordering: vector of size n or list of n1 vectors of total size n
+    #   If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+    #   such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
+    #   (i.e. variables that "appear before it" in the provided ordering).
+    #   If list must contains the layers of the networks, representing the "prior" ordering of variables,
+    #   such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+    #   with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
+    
+    if (class(ordering)=='list'){ # Layer ordering, each element of the list is a layer
+            
+            for (h in 1:length(ordering)){
+               if (i %in% ordering[[h]] ){
+                   i.pos <- h
+                   break # Once we find i.pos we don't need to look at the other layers
+               } 
+            }
+            if( i.pos == 1){ #If i is in the first layer, there are no parents to check
+                next
+            } else { # Notice the unlist. We treat all the preceding layers equally
+                i.parents.candidates <- unlist( ordering[1:i.pos-1] )
+            }
+        } else { # Normal ordering, the input is a vector
+            
+            #Compute vector of candidate parents for i
+            i.pos <- which(ordering == i) 
+       
+            if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
+                next 
+            } else {
+                i.parents.candidates <- ordering[1:i.pos-1]
+            }
+        }
+    
+    return(i.parents.candidates)
+}
 ```
 
 ```{r}
@@ -248,10 +299,13 @@ f(3, c(1,2), df)
 #   All values must be integers between 0 and r-1.
 # - u : integer
 #   Maximum number of parents for each node.
-# - ordering : vector of size n
-#   Must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+# - ordering : vector of size n or list of n1 vectors of total size n
+#   If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
 #   such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
 #   (i.e. variables that "appear before it" in the provided ordering).
+#   If list must contains the layers of the networks, representing the "prior" ordering of variables,
+#   such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+#   with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
 
 # Output:
 # adj : matrix of size (n, n)
@@ -260,9 +314,12 @@ f(3, c(1,2), df)
 # since it is most common to use i -> j
 
 #TODO:
-# - Optimize!
-# - Add support for layered ordering (if ordering is a list use layers, if it is vector use current method)
+# - Optimize! (kinda done)
+# - Add support for layered ordering (if ordering is a list use layers, if it is vector use current method) (DONE, TO TEST)
 # - ? Support for missing values in the database (or we could use bnstruct? See the method in the paper)
+# (From the paper: just use every possible value, but it is exponentially complex in the
+# number of missing values. Another possibility is to assign the value U to missing
+# data, thus treating a variable with r levels and missing data as a variable with r+1 levels)
 # - ? Organize code with classes
 # - ? Fancy stuff (organize in a R package, use roxygen2 to add documentation, and testthat for unit tests)
 
@@ -276,13 +333,31 @@ K2 <- function(database, u, ordering) {
         
         OKToProceed <- TRUE
         
-        #Compute vector of candidate parents for i
-        i.pos <- which(ordering == i) #Position of i in the ordering. Only variables before this position can be parents of i
+        # Sostituirei la scelta delle posizioni chiamando una funzione definita fuori
+        # prec(i, ordering) per non appesantire troppo il codice
+        if (class(ordering)=='list'){ # Layer ordering, each element of the list is a layer
+            
+            for (h in 1:length(ordering)){
+               if (i %in% ordering[[h]] ){
+                   i.pos <- h
+                   break
+               } 
+            }
+            if( i.pos == 1){
+                next
+            } else {
+                i.parents.candidates <- unlist( ordering[1:i.pos-1] )
+            }
+        } else { # Normal ordering, the input is a vector
+            
+            #Compute vector of candidate parents for i
+            i.pos <- which(ordering == i) #Position of i in the ordering. Only variables before this position can be parents of i
         
-        if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
-            next 
-        } else {
-            i.parents.candidates <- ordering[1:i.pos-1]
+            if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
+                next 
+            } else {
+                i.parents.candidates <- ordering[1:i.pos-1]
+            }
         }
         
         while (OKToProceed & length(i.parents) < u) {
