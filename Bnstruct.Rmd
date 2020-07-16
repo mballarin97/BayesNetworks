@@ -1,0 +1,238 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,Rmd
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.4.1
+  kernelspec:
+    display_name: R
+    language: R
+    name: ir
+---
+
+# Bnstruct
+
+```{r}
+library("bnstruct")
+library('igraph')
+```
+
+```{r}
+log.fact <- function(m, r){
+    # Return the logarithm of the first m+r-1 factorials
+    # m: int, number of cases in the dataset
+    # r: int, number of possible values a variable can assume
+    fact <- log( c(1, 1:(m+r-1)) )
+
+    for (i in 4:length(fact)) { #first 3 are already correct
+        fact[i] <- fact[i] + fact[i-1]
+    }
+    return(fact)
+}
+```
+
+```{r}
+f <- function(index, parents, database, r, factorials) { #Rename the variables
+    
+    #Compute N_{ijk}
+    p <- length(parents)
+    m <- nrow(database)
+    todec <- r ** (0:max(0,p-1)) 
+
+    rowcol <- array(dim = m)
+    
+    index.k <- database[index] + 1 #(0, 1) -> (1, 2)
+
+    if (p > 0)
+        index.j <- as.matrix(database[parents])%*%todec + 1 # 10 -> 2
+    else 
+        index.j <- rep(1,m)
+
+    
+    indexes <- cbind(index.j, index.k) 
+    indexes <- indexes[ order(indexes[,1], indexes[,2]),  ]
+    
+    d <- abs( diff( as.matrix(indexes) ) )
+    d1 <- d[,1] + d[,2]
+    
+    idx.unique <- indexes[c(0, which(d1>0), length(d1)+1), ]
+    N_ijk <- diff( c(0,which(d1>0), length(d1)+1) )
+    
+    N <- data.frame('Row'=idx.unique[,1], 'Col'=idx.unique[,2], 'Value'=N_ijk)
+    #print(N)
+    
+    #print(N)           
+    #Compute N_{ij}
+    Nj <- aggregate(.~Row,data=N,sum)[,c(3)]
+
+    
+    #Compute logN - already row summed
+    N$Value <- factorials[N$Value+1]  
+    logN <- aggregate(.~Row,data=N,sum)[,c(3)]
+    
+
+    
+    factor.first  <- factorials[r] #r_i-1+1
+    factor.second <- factorials[Nj+r] #+r_i -1 +1 (because of the indices)
+    factor.third  <- logN
+
+    result <- sum(factor.first - factor.second + factor.third) #factor.first could be brought outside to gain precision (and multiply by qi)
+
+    return(result)
+}
+```
+
+```{r}
+# K2 algorithm implementation
+
+# Parameters:
+# - database : data.frame of size (m, n).     #? Since it is always numeric, we could use a matrix also here!
+#   Dataset containing m observations of n variables, with no missing values.
+#   All values must be integers between 0 and r-1.
+# - u : integer
+#   Maximum number of parents for each node.
+# - ordering : vector of size n or list of n1 vectors of total size n
+#   If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+#   such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
+#   (i.e. variables that "appear before it" in the provided ordering).
+#   If list must contains the layers of the networks, representing the "prior" ordering of variables,
+#   such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+#   with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
+
+# Output:
+# adj : matrix of size (n, n)
+# Adjacency matrix of the most probable Directed Acyclic Graph found given the evidence in the database.
+# adj[i,j] is 1 if there is a connection from node j to node i (i.e. if j is a parent of i)  #? We could take the transpose,
+# since it is most common to use i -> j
+
+#TODO:
+# - Optimize! (kinda done)
+# - Add support for layered ordering (if ordering is a list use layers, if it is vector use current method) (DONE, TO TEST)
+# - ? Support for missing values in the database (or we could use bnstruct? See the method in the paper)
+# (From the paper: just use every possible value, but it is exponentially complex in the
+# number of missing values. Another possibility is to assign the value U to missing
+# data, thus treating a variable with r levels and missing data as a variable with r+1 levels)
+# - ? Organize code with classes
+# - ? Fancy stuff (organize in a R package, use roxygen2 to add documentation, and testthat for unit tests)
+
+K2 <- function(database, u, r, ordering) {    
+    n <- ncol(database)
+    m <- nrow(database)
+    adj <- matrix(data = 0, nrow = n, ncol = n)
+    factorials <- log.fact(m, r)
+    
+    for (i in 1:n) {
+        i.parents <- c()
+        log.p.old <- f(i, i.parents, database, r, factorials) #log-Probability of a structure with i disconnected
+        
+        OKToProceed <- TRUE
+        
+        # Sostituirei la scelta delle posizioni chiamando una funzione definita fuori
+        # prec(i, ordering) per non appesantire troppo il codice
+        if (class(ordering)=='list'){ # Layer ordering, each element of the list is a layer
+            
+            for (h in 1:length(ordering)){
+               if (i %in% ordering[[h]] ){
+                   i.pos <- h
+                   break
+               } 
+            }
+            if( i.pos == 1){
+                next
+            } else {
+                i.parents.candidates <- unlist( ordering[1:i.pos-1] )
+            }
+        } else { # Normal ordering, the input is a vector
+            
+            #Compute vector of candidate parents for i
+            i.pos <- which(ordering == i) #Position of i in the ordering. Only variables before this position can be parents of i
+        
+            if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
+                next 
+            } else {
+                i.parents.candidates <- ordering[1:i.pos-1]
+            }
+        }
+        
+        while (OKToProceed & length(i.parents) < u) {
+            log.p.new <- -Inf
+            newparent.index <- NA
+            
+            #Select the node from the candidate list that maximizes the structure's probability (greedy algorithm)
+            for (candidate in i.parents.candidates) {
+                log.p.candidate <- f(i, c(i.parents, candidate), database, r, factorials)
+                
+                if (log.p.candidate > log.p.new) {
+                    log.p.new <- log.p.candidate
+                    newparent.index <- candidate
+                }
+            }
+        
+            #Accept the new parent candidate only if it increases the total structure's probability
+            if (log.p.new > log.p.old) {
+                log.p.old <- log.p.new
+                i.parents <- c(i.parents, newparent.index)
+                adj[i, newparent.index] = 1
+                
+                #Remove the added parent from the candidates list
+                i.parents.candidates <- i.parents.candidates[-newparent.index]
+            } else { #If probability does not increase, stop adding parents to i
+                OKToProceed <- FALSE
+            }
+        }
+    }
+    
+    return(adj)
+}
+```
+
+```{r}
+bnstruct.K2 <- function(data.bn, max.parents, ordering){
+    r <- max(data.bn@node.sizes)
+    
+    if( has.imputed.data( data.bn))
+        data <- data.frame( imputed.data( data.bn)-1 )
+    else
+        data <- data.frame( complete(data.bn)-1 ) # Eliminating missing data
+    
+    adj.matrix <- K2(data, max.parents, r, ordering)
+       
+    net <- BN(data.bn)
+    net@dag <- t(adj.matrix)
+    
+    return(net)
+}
+```
+
+```{r}
+dataset <- child()
+dataset <- impute(dataset)
+```
+
+```{r}
+order <- list( c(1), c(2), c(3:8), c(9:15), c(15:20))
+```
+
+```{r}
+dataset@node.sizes
+```
+
+```{r}
+net <- bnstruct.K2(dataset, 2, order)
+```
+
+```{r}
+names <- net@variables
+```
+
+```{r}
+net1 <- graph_from_adjacency_matrix(net@dag, mode="directed")
+plot(net1, vertex.label = names)
+```
+
+```{r}
+
+```
