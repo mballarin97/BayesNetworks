@@ -15,14 +15,12 @@ jupyter:
 
 # Performance tests
 
-<!-- #region -->
-We have analyzed the algorithm from a theoretical point of view and tried it on a simple database to understand how it works. Now we want to test it even further: we will use different datasets obtained from  the bnlean website (https://www.bnlearn.com/bnrepository/). This resource gives us also the correct network structure, such that we can be sure of the performances of our algorithm.
 
+We have analyzed the algorithm from a theoretical point of view and tried it on a simple database to understand how it works. Now we want to test it even further: we will use different datasets obtained from  the bnlearn website (https://www.bnlearn.com/bnrepository/). This resource gives us also the correct network structure, such that we can be sure of the performances of our algorithm.
 
 This notebook requires the packages "bnstruct" and "bnlearn" <br>
 `install.packages('bnstruct')`
 `install.packages('bnlearn')`
-<!-- #endregion -->
 
 ```{r}
 library('bnlearn')
@@ -210,7 +208,7 @@ from_str_to_num <- function(data){
 ```{r}
 lt.data <- from_str_to_num(learning.test)
 lt.names <- colnames(lt.data)
-lt.struct <- K2(lt.data, 2, 3, c(1,3,6,2,4,5))
+lt.struct <- K2(lt.data, u=2, r=3, c(1,3,6,2,4,5))
 head(lt.data)
 ```
 
@@ -276,7 +274,7 @@ head(al.data)
 
 ```{r}
 al.diff <- sum(abs(al.struct-al.lay.struct))
-cat('Nuber of different links between the two structures:', al.diff, '\n')
+cat('Number of different arcs between the two structures:', al.diff, '\n')
 ```
 
 ```{r}
@@ -298,8 +296,8 @@ adj <- adj[al.names, al.names] # Reordering the adjacency matrix with our column
 al.norm.diff <- sum(abs(t(al.struct)-adj))
 al.lay.diff <- sum(abs(t(al.lay.struct)-adj))
 
-cat('Nuber of different links between the normal K2 and the true network:', al.norm.diff, '\n')
-cat('Nuber of different links between the layered K2 and the true network:', al.lay.diff, '\n')
+cat('Number of different arcs between the normal K2 and the true network:', al.norm.diff, '\n')
+cat('Number of different arcs between the layered K2 and the true network:', al.lay.diff, '\n')
 ```
 
 ```{r}
@@ -307,8 +305,8 @@ al.net <- graph_from_adjacency_matrix( t(al.struct), mode="directed")
 al.lay.net <- graph_from_adjacency_matrix( t(al.lay.struct), mode="directed")
 
 par(mfrow = c(1,2))
-plot(al.net, vertex.label = al.names, main='Alarm network')
-plot(al.lay.net, vertex.label = al.names, main='Alarm network')
+plot(al.net, vertex.label = al.names, main='Alarm normal network ')
+plot(al.lay.net, vertex.label = al.names, main='Alarm layered network')
 ```
 
 Analyzing the result we see that our algorithm gives optimal results also for a complex network such as ALARM. We also see that, in a network with a layered structure as ALARM using it improves the performances, bringing us to the same number of errors as the paper of $K2$.
@@ -387,18 +385,18 @@ We have too few samples to actually make a reliable analysis. Nevertheless we ca
 # Bnstruct
 
 
-Bnstruct is an R package developed by Francesco Sambo and Alberto Franzinthat provides objects and methods for learning the structure and parameters of a Bayesan Network in various situations, such as the presence of missing data.
+Bnstruct is an R package developed by Francesco Sambo and Alberto Franzin that provides objects and methods for learning the structure and parameters of a Bayesan Network in various situations, such as the presence of missing data.
 
-One of the most important feature of Bnstruct is the possibility of performing *imputation*, with which we infere the missing data using a k-Nearest Neighbor algorithm.
+One of the most important feature of Bnstruct is the possibility of performing *imputation*, with which we infer the missing data using a k-Nearest Neighbor algorithm.
 
 It provides $5$ different algorithms for the structure learning:
 - Silander-Myllymaki (sm), which is an exact, and so really slow, method;
-- Max-Min Parent-and-Children, a constraint-based heuristic approach that discover only the presence of edges but not their directionality;
+- Max-Min Parent-and-Children, a constraint-based heuristic approach that discovers only the presence of edges but not their directionality;
 - Hill Climbing method, another heuristic method;
 - Max-Min Hill-Climbing (default one), which is a combination of the previous two, discovering first the skeleton of the network and then performing a greedy evaluation to find the directionality;
 - Structural Expectation-Maximization (sem), for learning from a network with missing values.
 
-Our goal is to code a wrapper for our $K2$ algorithm, such that can be used in BNstruct. In particular we want that:
+Our goal is to code a wrapper for our $K2$ algorithm, such that it can be used in BNstruct. In particular we want that:
 - It takes as input a BNdatasets;
 - Gives as output a BN object with the correct adjacency matrix.
 
@@ -421,13 +419,11 @@ bnstruct.K2 <- function(data.bn, max.parents, ordering){
     # - net: BN
     #   BN object containing the input dataset and the adjacency matrix computed with K2
     
-    r <- max(data.bn@node.sizes) # Maximum number of leves of the variables
-    
     if( has.imputed.data( data.bn)) # Pick imputed data if possible
-        data <- data.frame( imputed.data( data.bn)-1 )
+        data <- data.frame( imputed.data( data.bn) - 1 )
     else{
-        data <- complete(data.bn)
-        data <- data.frame( data@raw.data - 1 ) # Else eliminate missing data
+        data <- complete(data.bn) # Else eliminate missing data
+        data <- data.frame( data@raw.data - 1 ) 
     }
     adj.matrix <- K2(data, max.parents, r, ordering) # Performing K2 algorithm
         
