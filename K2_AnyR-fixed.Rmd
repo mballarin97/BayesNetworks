@@ -1,0 +1,545 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,Rmd
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.3.2
+  kernelspec:
+    display_name: R
+    language: R
+    name: ir
+---
+
+# Bayesian network structure from database
+
+
+Bayesian networks are networks that can provide insight into probabilistic dependencies that exist among variables in a dataset. In particular we focus on using a Bayesian belief network as a model of probabilistic dependency.
+
+A Bayesian belief-network $B_S$ is a directed acyclic graph in which nodes represent domain variables and the links represent probabilistic dependencies. Variables can be discrete of continuous, but in this work we will focus on discrete variables. 
+
+A Bayesian belief structure , $B_S$ is augmented by conditional probabilities, $B_P$, to form a Bayesian belief network $B=(B_S, B_P)$. For each node $x_i$ there is a conditional probability function that relates the node to its immediate predecessor, called parents and denoted with $\pi_i$. If a node has no parents a prior probability $P(x_i)$ is specified.
+
+The key feature of belief networks is their explicit representation of the conditional indipendence and dependence among events. In particular the joint probability of any instantiation of all $n$ variables in a belief network can be calculated as follows:
+$$
+P(X_1, \ldots,X_n)=\prod_{i=1}^n P(X_i|\pi_i)
+$$
+where $X_i$ represent the instantiation of the variable $x_i$ and the $\pi_i$ are the parents of $x_i$.
+
+## The basic model
+Let $D$ be a database of cases, $Z$ be the set of variables represented by $D$ and $B_{S_i}$, $B_{S_j}$ be two belief networks structures containing exactly those variables that are in Z. Then:
+$$
+\frac{P(B_{S_i}|D)}{P(B_{S_j}|D)}\stackrel{prod-rule}{=}\frac{P(B_{S_i},D)}{P(B_{S_j},D)}
+$$
+We now make some assumptions for computing $P(B_S,D)$ efficiently:
+
+1. The database variables, which we denote with $Z$, are **discrete**. We thus have:
+$$
+P(B_S, D)=\int_{B_P}P(D|B_s,B_P)f(B_P|B_S)P(B_S)dB_P
+$$
+where $B_P$ is a vector which denotes the conditional probability assignments associated with belief network structure $B_S$, and $f$ is the conditional probability density function over $B_P$ given $B_S$.
+2. Cases occur **independently**, given a belief network model. The Eq \ref{discr} becomes:
+$$
+P(B_S, D)=\int_{B_P}\left[\prod_{h=1}^mP(C_h|B_S,B_P)\right]f(B_P|B_S)P(B_S)dB_P
+$$
+where $m$ is the number of cases in $D$ and $C_h$ is the $h$-th case in $D$.
+3. There are **no** cases that have variables with **missing values**.
+4. The density function $f(B_P|B_S)$ is **uniform**.
+
+We now denote with $w_{ij}$ the $j$-th of $q_i$ unique instantiations of the values of the variables in $\pi_i$, relative to the ordering of the cases in $D$. We then define $v_{ik}$ the $k$-th of the $r_i$ possible instantiations of the variable $x_i$ in $Z$. We lastly define $N_{ijk}$ as the number of casas in $D$ in which the variable $x_i$ has value $v_{ik}$ and $\pi_i$ is instantiated as $w_{ij}$.
+Calling:
+$$
+N_{ij}=\sum_{k=1}^{r_i}N_{ijk}
+$$
+we finally get:
+$$
+P(B_S,D)=P(B_S)\prod_{i=1}^n\prod_{j=1}^{q_i} \frac{(r_i-1)!}{(N_{ij}+r_i-1)!}\prod_{k=1}^{r_i}N_{ijk}!
+$$
+
+Once we have $P(B,D)$ it is easy to find the conditional probability. Let $Q$ be the set of all those belief-network structures that contain just the variables in set $Z$, then:
+$$
+P(B_{S_i}|D)=\frac{P(B_{S_i},D)}{\sum_{B_S\in Q}P(B_S,D)}
+$$
+
+We can also look at smaller part of the network. Let $G$ be a belief network structure, such that the variables in G are a subset of those in $Z$. Let $R$ be the set of those structures in $Q$ that contains $G$ as a subgraph. Then:
+$$
+P(G|D)=\frac{\sum_{B_S\in R}P(B_S,D)}{\sum_{B_S\in Q}P(B_S,D)}
+$$
+
+## K2 algorithm
+However the size and the computational time of finding the structure of a belief network increase exponentially with $n$. So an exact method is not possible: we will apply a greedy search algorithm known as K2. This algorithm begins by making the assumption that a node has no parents. and then adds incrementally that parent whose addition most increase the probability of the resulting structure. We stop the procedure when the addition of no single parent does not increase further the probability.
+We define:
+$$
+g(i,\pi_i)=\prod_{j=1}^{q_i} \frac{(r_i-1)!}{(N_{ij}+r_i-1)!}\prod_{k=1}^{r_i}N_{ijk}!
+$$
+We also define the function Pred($x_i$) which returns the set of nodes that precede $x_i$ in the node ordering. We thus have the procedure:
+
+- *Input*: a set of $n$ nodes, an ordering of the nodes, an upper bound $u$ to the number of parents a node may have and a database $D$ containing $m$ cases.
+- *Output*: For each node a printout of the parents of the node.
+
+```{r}
+#Needed packages installation
+#install.packages("bnlearn")
+#install.packages("bnstruct")
+```
+
+```{r}
+library("bnlearn")
+library("bnstruct")
+```
+
+```{r}
+# Pseudocode, not to run
+for(i in 1:n){  # Cycle over the nodes
+    pi.i <- c() # Empty vector
+    p.old <- g(i, pi.i) # Function defined above
+    OKtoGO <- TRUE
+    
+    while(OKtoGO & length(pi.i)<u ){
+        # let z be the node in Pred(x_i)-pi.i that maximizes g(i, pi.i U {z} )
+        z <- which.max( g(i, c(pi.i, pred(x_i)) ) )
+        p.new <- g(i, pi.i)
+        
+        if(p.new >p.old){ # The new configuration is more probable
+            p.old <- p.new
+            pi.i <- c(pi.i, z) # New parents adding z
+        }
+        else{  OKtoGO <- FALSE }
+        
+    }
+    cat('Node:', x.i, ' Parents of this node:', pi.i)
+}
+```
+
+```{r}
+# Sample dataset D
+# (x1, x2, x3) are binary variables
+x1 <- c(1, 1, 0, 1, 0, 0, 1, 0, 1, 0)
+x2 <- c(0, 1, 0, 1, 0, 1, 1, 0, 1, 0)
+x3 <- c(0, 1, 1, 1, 0, 1, 1, 0, 1, 0)
+df <- data.frame(x1, x2, x3)
+```
+
+$$ f(i, \pi_i) = \prod_{j=1}^{q_i} \frac{(r_i - 1)!}{(N_{ij} + r_i - 1)!} \prod_{k=1}^{r_i} N_{ijk}! $$
+
+
+$$ \log f(i, \pi_i) = \sum_{j=1}^{q_i} \Big[ \log (r_i - 1)! - \log (N_{ij} + r_i - 1)!  + \sum_{k=1}^{r_i} \log N_{ijk}! \Big]$$
+
+```{r}
+#Precompute all needed (log)factorials (1 to m + r -1)
+n <- ncol(df)
+m <- nrow(df)
+r <- 2 #number of possible values
+
+factorials <- log(c(1, 1:(m+r-1)))
+
+for (i in 4:length(factorials)) { #first 3 are already correct
+    factorials[i] <- factorials[i] + factorials[i-1]
+}
+
+#factorials[i+1] = log(i!) (since in R indices start from 1)
+```
+
+```{r}
+# Vectorization of the maximization over the possible parents of the probability
+
+# Creating a list of length 1 from the previous parents 
+i.par <-  list( i.parents ) 
+# Creating a list of length length(i.parents.candidates)
+i.cand <- as.list(i.parents.candidates)
+# Appending to each element of i.cand the list i.par, and so all the previous parents
+i.possible.parents <- mapply(append, i.cand, i.par, SIMPLIFY = FALSE)
+# Apply f over all possible parents and then making it a vector
+possible.funs <- unlist( lapply(i.possible.parents, f, index=i, database=df) )
+log.p.new <- max( possible.funs) # max value
+newparent.index <- which.max( possible.funs) # index of the max value
+```
+
+```{r}
+pred <- function(i, ordering){
+    # Parameters:
+    # - i: int
+    #    index of the variable of which we are searching the precedents
+    # - ordering: vector of size n or list of n1 vectors of total size n
+    #   If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+    #   such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
+    #   (i.e. variables that "appear before it" in the provided ordering).
+    #   If list must contains the layers of the networks, representing the "prior" ordering of variables,
+    #   such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+    #   with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
+    
+    if (class(ordering)=='list'){ # Layer ordering, each element of the list is a layer
+            
+            for (h in 1:length(ordering)){
+               if (i %in% ordering[[h]] ){
+                   i.pos <- h
+                   break # Once we find i.pos we don't need to look at the other layers
+               } 
+            }
+            if( i.pos == 1){ #If i is in the first layer, there are no parents to check
+                next
+            } else { # Notice the unlist. We treat all the preceding layers equally
+                i.parents.candidates <- unlist( ordering[1:i.pos-1] )
+            }
+        } else { # Normal ordering, the input is a vector
+            
+            #Compute vector of candidate parents for i
+            i.pos <- which(ordering == i) 
+       
+            if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
+                next 
+            } else {
+                i.parents.candidates <- ordering[1:i.pos-1]
+            }
+        }
+    
+    return(i.parents.candidates)
+}
+```
+
+```{r}
+# K2 algorithm implementation
+
+# Parameters:
+# - database : data.frame of size (m, n).     #? Since it is always numeric, we could use a matrix also here!
+#   Dataset containing m observations of n variables, with no missing values.
+#   All values must be integers between 0 and r-1.
+# - u : integer
+#   Maximum number of parents for each node.
+# - ordering : vector of size n OR list of n1 vectors of total size n
+#   If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+#   such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
+#   (i.e. variables that "appear before it" in the provided ordering).
+#   If list must contains the layers of the networks, representing the "prior" ordering of variables,
+#   such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+#   with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
+
+# Output:
+# adj : matrix of size (n, n)
+# Adjacency matrix of the most probable Directed Acyclic Graph found given the evidence in the database.
+# adj[i,j] is 1 if there is a connection from node j to node i (i.e. if j is a parent of i)  #? We could take the transpose,
+# since it is most common to use i -> j
+
+#TODO:
+# - Optimize! (kinda done)
+# - Add support for layered ordering (if ordering is a list use layers, if it is vector use current method) (DONE, TO TEST)
+# - ? Support for missing values in the database (or we could use bnstruct? See the method in the paper)
+# (From the paper: just use every possible value, but it is exponentially complex in the
+# number of missing values. Another possibility is to assign the value U to missing
+# data, thus treating a variable with r levels and missing data as a variable with r+1 levels)
+# - ? Organize code with classes
+# - ? Fancy stuff (organize in a R package, use roxygen2 to add documentation, and testthat for unit tests)
+
+K2 <- function(database, u, ordering) {    
+    debug <- FALSE
+    
+    n <- ncol(database)
+    m <- nrow(database)
+    
+    r <- max(database) + 1 # Check if minimum is 0, and if all values between min and max are used
+    
+    adj <- matrix(data = 0, nrow = n, ncol = n) #Allocate adjacency matrix 
+    
+    db.plus1 <- database + 1 #Useful for indices computation
+    
+    for (i in 1:n) {
+        i.parents <- c() #Each node i starts with no parents
+        
+        #Evaluate (log)-probability of i having no parents
+        counts <- rep(0,r)
+        
+        for (nrow in 1:m) {
+            counts[db.plus1[nrow,i]] <- counts[db.plus1[nrow,i]] + 1
+        }        
+        
+        log.p.old <- factorials[r] - factorials[m+r] + sum(factorials[counts + 1])
+        if (debug) cat('x', i, ' [], log(p) = ', log.p.old, '\n')
+        
+        OKToProceed <- TRUE
+        
+        #Determine which nodes can be parents of i
+        
+        #TODO: Add checks for consistency
+        if (class(ordering)=='list'){ # Layer ordering, each element of the list is a layer
+            for (h in 1:length(ordering)){
+               if (i %in% ordering[[h]] ){
+                   i.pos <- h
+                   break
+               } 
+            }
+            if( i.pos == 1){
+                next
+            } else {
+                i.parents.candidates <- unlist( ordering[1:i.pos-1] )
+            }
+        } else { # Normal ordering, the input is a permutation
+            i.pos <- which(ordering == i) #Position of i in the ordering. Only variables before this position can be parents of i
+        
+            if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
+                next 
+            } else {
+                i.parents.candidates <- ordering[1:i.pos-1]
+            }
+        }
+        
+        parents.length <- length(i.parents)        
+        
+        #Add at most u nodes as parents of i,
+        #only if each one of them increases the structure's probability
+        while (OKToProceed & parents.length < u) {
+            log.p.new <- -Inf
+            newparent.index <- NA
+            
+            #To compute probabilities, we need a matrix of frequencies N.jk 
+            #N.jk[j, k] <- frequency of cases in the database
+            #with parents(x_i) == j-th value and x_i == k-th value
+            #j goes from 1 to r**(length(parents))
+            #k goes from 1 to r
+            
+            #First we compute the indices for each case in the database
+            #Then we compute their frequencies
+            
+            index.k <- db.plus1[,i] #k index (vector of size m)
+            
+            #j can be computed by taking the values of the columns in database corresponding to the
+            #parents of i, and treating them as digits of a number in base r
+            
+            todec <- r ** (0:max(0, parents.length - 1))
+            if (parents.length > 0)
+                index.j.common <- as.matrix(database[,i.parents]) %*% todec + 1
+            else 
+                index.j.common <- rep(1,m)
+            dim(index.j.common) <- NULL 
+            
+            #Adding a new parent is equivalent to adding a new column to the above matrix
+            #i.e. adding a new digit to the number in base r.
+            #Thus we can compute at once the indices j obtained by adding every parent candidate
+            #one at a time
+            
+            index.j.new <- r**(max(0, parents.length)) * 
+                            as.matrix(database[,i.parents.candidates]) + index.j.common
+            #Matrix of size (m, length(i.parents.candidates))
+            
+            #Then we can compute the frequencies and so the probabilities:
+            last.c <- 0
+            for (c in 1:length(i.parents.candidates)) {
+
+                N.jk <- matrix(data = 0, nrow = r**(parents.length + 1), ncol = r)
+                #Frequencies for the c-th candidate
+                
+                for (nrow in 1:m) {
+                    N.jk[index.j.new[nrow, c], index.k[nrow]] <- N.jk[index.j.new[nrow, c], index.k[nrow]] + 1
+                }
+                
+#                 if (debug) {
+#                     cat('Candidate ', i.parents.candidates[c], '\n')
+#                     print(N.jk)
+#                     cat('\n')
+#                 } 
+
+                N.j <- rowSums(N.jk)
+                N.jk.logfact <- matrix(data = factorials[N.jk + 1], nrow = r**(parents.length + 1))
+                
+                factor.first  <- factorials[r]     #r_i-1+1
+                factor.second <- factorials[N.j+r] #+r_i -1 +1
+                factor.third  <- rowSums(N.jk.logfact)
+
+                log.p.candidate <- sum(factor.first - factor.second + factor.third)
+                
+                if (debug) cat('x', i, ' [', i.parents, ', +', i.parents.candidates[c], '+], log(p) = ', log.p.candidate, '\n')
+                
+                if (log.p.candidate > log.p.new) { #Select the candidate with the highest probability
+                    log.p.new <- log.p.candidate
+                    newparent.index <- i.parents.candidates[c]
+                    last.c <- c #index of candidate in the i.parents.candidates vector (!= newparent.index)
+                }
+            }
+        
+            #Accept the new parent candidate only if it increases the total structure's probability
+            if (log.p.new > log.p.old) {
+                log.p.old <- log.p.new
+                i.parents <- c(i.parents, newparent.index)
+                
+                if (debug) cat(newparent.index, ' -> ', i, '\n')
+
+                parents.length <- parents.length + 1
+                
+                adj[i, newparent.index] = 1 #Save the result
+                
+                #Remove the added parent from the candidates list
+                i.parents.candidates <- i.parents.candidates[-last.c]
+                
+                if (length(i.parents.candidates) == 0) { #If there are no candidates to check, terminate
+                    OKToProceed <- FALSE
+                    if (debug) cat('\n---\n')
+                }
+            } else { #If probability does not increase, stop adding parents to i
+                OKToProceed <- FALSE
+                if (debug) cat('\n---\n')
+            }
+        }
+    }
+    
+    return(adj)
+}
+```
+
+```{r}
+#Print the structure
+start_time <- Sys.time()
+structure <- K2(df, 2, c(1,2,3))
+stop_time <- Sys.time()
+
+print(structure)
+print(stop_time - start_time)
+```
+
+```{r}
+#Should be:
+# [0, 0, 0]
+# [1, 0, 0]
+# [0, 1, 0]
+
+for (i in 1:nrow(structure)) {
+    cat("Node ", i, " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(j)
+        }
+    }
+    
+    cat("]\n")
+}
+```
+
+```{r}
+net <- graph_from_adjacency_matrix(t(structure), mode="directed")
+l <- cbind(1:3, rep(0,3))
+l <- norm_coords(l, ymin=-1, ymax=0, xmin=-1, xmax=4)
+
+plot(net, layout=l) #for some reason the plot size is too big...
+```
+
+```{r}
+library('bnlearn')
+library('bnstruct')
+```
+
+```{r}
+log.fact <- function(m, r){
+    # Return the logarithm of the first m+r-1 factorials
+    # m: int, number of cases in the dataset
+    # r: int, number of possible values a variable can assume
+    fact <- log( c(1, 1:(m+r-1)) )
+
+    for (i in 4:length(fact)) { #first 3 are already correct
+        fact[i] <- fact[i] + fact[i-1]
+    }
+    return(fact)
+}
+
+
+factorials <- log.fact(m, r)
+```
+
+```{r}
+data.alarm <- data.frame(sapply(alarm, as.numeric)-1)
+
+m <- nrow(data.alarm)
+r <- 4
+
+factorials <- log.fact(m, r)
+```
+
+```{r}
+order <- c(18, 20, 3, 9, 15, 23, 36, 21, 19, 17, 16, 30, 11, 35, 22, 29, 
+           2, 24, 0, 1, 27, 25, 12, 34, 14, 33, 31, 10, 32, 13, 26, 28, 6, 5, 7, 8, 4)+1
+
+start_time <- Sys.time()
+structure <- K2(data.alarm, 4, order)
+end_time <- Sys.time() 
+
+#Performance is worst. But at least it works :)
+
+print(structure)
+al.name <- colnames(data.alarm)
+for (i in 1:nrow(structure)) {
+    cat("Node ", al.name[i], " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(al.name[j], ' ')
+        }
+    }
+    cat("]\n")
+}
+cat('Took ', end_time-start_time, 's\n')
+```
+
+```{r}
+a <- matrix(data=1, nrow=3, ncol=2)
+b <- matrix(data=2, nrow=3, ncol=1)
+```
+
+```{r}
+dim(b) <- NULL
+```
+
+```{r}
+b
+```
+
+```{r}
+a+b
+```
+
+```{r}
+al_net <- load('alarm.rda')
+```
+
+```{r}
+names <- sapply(c(1:37), function(x) bn[[x]]$node )
+adj <- matrix( data=0, nrow=length(names), ncol=length(names))
+
+i <- 1
+for(n in bn){
+    par <- n$parents
+    for(p in par){
+        idx <- which( names==p )
+        print(idx)
+        adj[i, idx[1]] <- 1
+    }
+    i <- i+1
+}
+```
+
+```{r}
+
+```
+
+```{r}
+names
+```
+
+```{r}
+colnames(data.alarm)
+```
+
+```{r}
+c('HIST')
+```
+
+```{r}
+#TODO
+#---Coding---#
+#Evaluate the performance (timing)
+
+
+#Bnstruct
+
+#---Writing---#
+#Write comments for everything
+```
