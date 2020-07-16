@@ -1,0 +1,751 @@
+---
+jupyter:
+  jupytext:
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.3.2
+  kernelspec:
+    display_name: R
+    language: R
+    name: ir
+---
+
+# Bayesian networks & K2 algorithm
+
+
+## Introduction
+
+<!-- #region -->
+A Bayesian belief-network structure $B_s$ is a directed acyclic graph in which nodes represent domain variables and arcs between nodes represent probabilistic dependencies. In order to form a complete Bayesian belief network $B$, this structure is augmented by a set of conditional probabilities, $B_f$, that relates every node to its immediate predecessors (*parents*). In the following we will use $\pi_i$ to denote the parent nodes of variable $x_i$.
+
+We will use the term *conditional probability* to refer to a probability statement, such as $P(x_1 = 0|x_2=0)$, and the term *conditional probability assignment* to denote a numerical assignment to the probability statement.
+
+
+With this structure we can explicitly represent conditional independence and dependence among events. Moreover, the joint probability of any particular instantiation of all n variables in a belief network can be calculated as:
+
+\begin{equation}
+P(X_1, ..., X_N) = \prod_{i=1}^n P(X_i|\pi_i)
+\label{\eqn:1}
+\tag{1}
+\end{equation}
+
+
+Although researchers have made substantial advances in developing the theory and application of belief networks, the actual construction of these networks often remains a difficult, time-consuming task.
+
+In this project we present an algorithm able to find the most probable network structure, given an initial ordering of the variables. The **K2 algorithm**.
+
+
+## The most probable structure
+
+
+Let $D$ be a database of cases, $Z$ be the set of variables represented by $D$, and $B_{s_i}$ and $B_{s_j}$ two belief-network structures containing exactly those variables that are in $Z$. In order to rank order a set of structures by their posterior probabilities we have to compute the ratio:
+
+\begin{equation}
+\frac{P(B_{s_i}|D)}{P(B_{s_j}|D)} = \frac{P(B_{s_i},D)}{P(D)}\frac{P(D)}{P(B_{s_j},D)} = \frac{P(B_{s_i},D)}{P(B_{s_j},D)}
+\label{eqn:2}
+\tag{2}
+\end{equation}
+
+
+To compute this ratio in an efficent way, we have to make four assumptions:
+
+1. **The database variables, which we denote as Z, are discrete.** 
+
+    The application of this assumption yields to:
+
+    \begin{equation}
+    P(B_S,D) =\int_{B_p} P(D|B_s,B_p) f(B_p|B_s) P(B_s) dB_p
+    \label{eqn:3}
+    \tag{3}
+    \end{equation}
+    
+    where $B_p$ is a vector whose values denote the conditional-probability assignments associated with belief-network structure $B_s$.
+
+
+2.  **Cases occur independently, given a belief-network model.** 
+    
+    In this case, equation \ref{eqn:3} becomes:
+    
+    \begin{equation}
+    P(B_S,D) =\int_{B_p} \prod_{h=1}^m \left[ P(C_h|B_s,B_p) \right] f(B_p|B_s) P(B_s) dB_p
+    \label{eqn:4}
+    \tag{4}
+    \end{equation}
+    
+    where m is the number of cases in $D$ and $C_h$ is the h-th case in $D$.
+    
+    
+3.  **There are no cases that have variables with missing values.**  
+
+
+4.  **The density function $f(B_p|B_s)$ in equations \ref{eqn:3} and \ref{eqn:4} is uniform.** 
+
+
+Given these assumptions, we are now ready to state an important result. 
+
+**Theorem**
+
+Let $Z$ be a set of n discrete variables, where a variable $x_i$ in $Z$ has $r_i$ possible value assignments: $(v^i_1,...,v^i_{r_i})$.
+
+Let $D$ be a database of m cases, where each case contains a value assignment for each variable in $Z$.
+
+Let $B_s$ denote a belief-network structure containing just the variables in $Z$. 
+
+Each variable $x_i$ in $B_s$ has a set of parents, which we represent with a list of variables $\pi_i$.
+
+Let $w_{ij}$ denote the j-th unique instantiation of $\pi_i$ relative to D.
+
+Suppose there are $q_i$ unique instantiations of $\pi_i$. 
+
+Define $N_{ijk}$ to be the number of cases in $D$ in which variable $x_i$ has the value $v^i_k$ and $\pi_i$ is instantiated as $w_{ij}$. 
+
+Let $ N_{ij} = \sum_{k=1}^{r_i} N_{ijk}$
+
+Then, given assumptions 1-4, it follows that:
+
+
+\begin{equation}
+P(B_S,D) = P(B_S)\prod_{i=1}^{n} \prod_{j=1}^{q_i}\frac{(r_i -1)!}{(N_{ij} + r_i -1)!}\prod_{k=1}^{r_i}N_{ijk}!
+\label{eqn:5}
+\tag{5}
+\end{equation}
+
+
+Since $P(B_S|D) \propto P(B_S,D)$, finding the $B_S$ that maximizes $P(B_S|D)$ is equivalent to finding the $B_S$ that maximizes $P(B_S,D)$. However, the number of possible structures grows exponentially with the number of nodes.
+
+
+Let us assume that we can specify an ordering on all n variables, such that, if $x_i$ precedes $x_j$ in the ordering, then we do not allow structures in which there is an arc from $x_j$ to $x_i$.
+In addition to a node ordering, let us assume equal priors $P(B_S) = c$.
+
+Then, to maximize \ref{eqn:5} with this assumptions we need only to find the parent set of each variable that maximizes the second inner product.
+
+In fact, now we have:
+
+\begin{equation}
+\underset{B_S}{\operatorname{max}} \left[P(B_S,D) \right] = c\prod_{i=1}^{n} \underset{\pi_i}{\operatorname{max}}\left[ \prod_{j=1}^{q_i}\frac{(r_i -1)!}{(N_{ij} + r_i -1)!}\prod_{k=1}^{r_i}N_{ijk}! \right]
+\label{eqn:6}
+\tag{6}
+\end{equation}
+
+A node $x_i$ can have at most $n-1$ nodes as parents. Thus, over all possible $B_S$ consistent with the ordering, $x_i$ can have no more than $2^{n-1}$ unique sets of parents. Therefore, the maximization on the right of \ref{eqn:6} occurs over at most $2^{n-1}$ parent sets.
+
+In order to make the computation more feasible, we can also assume that for all distinct pairs of variables $x_i$ and $x_j$, our belief about $x_i$ having some set of parents is independent of our belief about $x_j$ having some set of parents. 
+
+
+## K2 algorithm
+
+
+We now describe a heuristic-search method used to maximize $P(B_S,D)$. We make the assumptions that we have an ordering on the domain variables and that, a priori, all structures are considered equally likely.
+
+We modify the maximization operation on the right of \ref{eqn:6} to use a greedy-search method. In particular, we use an algorithm that begins by making the assumption that a node has no parents, and then adds incrementally that parent whose addition most increases the probability of the resulting structure, and when the addition of no single parent can increase the probability, we stop adding parents to the node.
+
+We use the function:
+
+\begin{equation}
+g(i, \pi_i) = \prod_{j=1}^{q_i}\frac{(r_i -1)!}{(N_{ij} + r_i -1)!}\prod_{k=1}^{r_i}N_{ijk}!
+\label{eqn:7}
+\tag{7}
+\end{equation}
+
+We also use a function $Pred(x_i)$ that returns the set of nodes that precede $x_i$ in the node ordering.
+
+We now present the pseudocode of the K2 algorithm:
+
+<img src="K2_flow.png" width="600" height="400">
+
+
+From a time complexity perspective, computing and storing the factorials requires $O(m+r-1)$ time. Since each call to **g** requires $O(mur)$ time, line 10 requires $O(mnur)$ time. Each time the **while** loop is entered it loops $O(u)$ time, and the **for** statements loops n times.
+
+Combining these results, the overall K2 complexity is: $O(m+r-1) +O(munr)O(u)n = O(mu^2n^2r)$.
+
+In our implementation the speed of the algorithm is improved replacing function **g** with its logarithm. Moreover, with this approach we prevent possible overflows.
+<!-- #endregion -->
+
+```{r}
+#Install needed packages
+#install.packages("docstring")
+#install.packages("bnstruct")
+#install.packages("bnlearn")
+```
+
+```{r}
+library(docstring)
+library('bnlearn')
+library('bnstruct')
+options(repr.plot.width=16, repr.plot.height=8)
+```
+
+```{r}
+# Sample dataset D
+# (x1, x2, x3) are binary variables
+x1 <- c(1, 1, 0, 1, 0, 0, 1, 0, 1, 0)
+x2 <- c(0, 1, 0, 1, 0, 1, 1, 0, 1, 0)
+x3 <- c(0, 1, 1, 1, 0, 1, 1, 0, 1, 0)
+df <- data.frame(x1, x2, x3)
+```
+
+```{r}
+log.fact <- function(m, r){
+    #' Precompute log of factorials from 0 to m+r-1
+    #'
+    #' `log.fact` returns an array `a` of m+r elements, such that `a[i+1] = log(i!)`
+    #'
+    #' @param m Integer
+    #' @param r Integer
+    #' @return Numeric vector of size `m+r`, such that the (i+1)-th element contains log(i!).
+    #'
+    #' @examples
+    #' log.fact(2, 3)
+    
+    fact <- log( c(1, 1:(m+r-1)) )
+
+    for (i in 4:length(fact)) { #0! = 1, 1! = 1, 2! = 2, so they are already correct
+        fact[i] <- fact[i] + fact[i-1]
+    }
+    return(fact)
+}
+```
+
+The following function computes:
+$$ \log f(i, \pi_i) = \sum_{j=1}^{q_i} \Big[ \log (r_i - 1)! - \log (N_{ij} + r_i - 1)!  + \sum_{k=1}^{r_i} \log N_{ijk}! \Big]$$
+where:
+- $r_i$ is the number of values that the $i$-th variable ($x_i$) can assume (e.g. $x_i \in \{0,1\} \Rightarrow r_i = 2$
+- $\mathbf{\pi_i}$ contains the indices of the parents of $i$ (e.g. if $x_2, x_3 \rightarrow x_i$ in the DAG, then $\mathbf{\pi_i} = (1,2)$)
+- $q_i$ is the number of possible values that the variables in $\mathbf{\pi_i}$ can take. For example, if $\mathbf{\pi_i} = (1,2)$, and both $x_1$ and $x_2$ are binary, then $q_i = 2^2$, since $(x_1, x_2) \in \{(0,0), (0,1), (1,0), (1,1)\}$. Treating the values of $x_j \in \mathbf{\pi_i}$ as digits of a binary number (or, in general, of a number in base $r = \max_j(r_j)$) defines a natural ordering for the possible values of $\mathbf{\pi_i}$.
+- $N_{ijk}$ is the number of cases in the database $D$ where $x_i$ assumes its $k$-th value, and $\mathbf{\pi_i}$ its $j$-th value.
+- $N_{ij} = \sum_{k=1}^{r_i} N_{ijk}$
+
+```{r}
+f <- function(i, i.parents, database, r, factorials) {
+    #' Computes the function f
+    #'
+    #' Returns the joint (log)probability that node i has parents i.parents, and that this bayesian network 
+    #' has produced all the cases observed in database.
+    #'
+    #' @param i Integer. Represents a node.
+    #' @param i.parents Vector of integers. Parents of i. Should not contain i itself.
+    #' @param database data.frame of size (m,n) with all integer values between 0 and r-1. Observed cases.  
+    #' @param r Integer. Number of possible values a single observation in database can assume.
+    #' @param factorials Numeric vector. Precomputed log(factorial(i)) for i from 0 to m+r-1 (see log.fact function)
+    #' @return Numeric. Probability that i has i.parents as parents, and that this structure results
+    #' in the observed database.
+    
+    parents.length <- length(i.parents)
+    m <- nrow(database)
+    
+    #From each row of database we compute the indices j and k
+    
+    #k: value of the i-th variable (database[i]) + 1
+    #+1 is needed because indices in R start from 1, and database contains values 0:r-1
+    index.k <- database[i] + 1
+    
+    #j: take values of database[i.parents], and treat them as digits of a number in base r 
+    #(then add 1 to account for R indices)
+    todec <- r ** (0:max(0,parents.length-1)) 
+    
+    if (parents.length > 0)
+        index.j <- as.matrix(database[i.parents])%*%todec + 1
+    else 
+        index.j <- rep(1,m)
+
+    #Gather the indices in a matrix
+    indexes <- cbind(index.j, index.k) 
+    
+    #Sort
+    indexes <- indexes[ order(indexes[,1], indexes[,2]),  ]
+    
+    #Now indexes is a sequence of "ordered blocks of rows", e.g.
+    # indexes <- [[1, 1], [1, 2], [1, 2], [2, 1], [2, 2]]
+    #We want to count the length of each block (i.e. number of "repetitions" of each row)
+    #By taking the differences between each row and the previous one:
+    d <- abs( diff( as.matrix(indexes) ) )
+    #the only rows with non-zero elements are the ones at the "boundaries" of blocks
+    
+    #The example from before leads to:
+    #d <- [[0, 1], [0, 0], [1, 1], [0, 1]]
+    
+    #Sum columns to reduce the matrix to a vector:
+    d1 <- d[,1] + d[,2]
+    #d1 <- [1, 0, 2, 1]
+    
+    #The unique rows are the ones with non-zero values + the last one
+    idx.unique <- indexes[c(which(d1>0), length(d1)+1), ]
+    
+    #To compute repetitions, we add an element at the boundaries (start and end)
+    #and take the differences of the indices of non-zero values
+    N_ijk <- diff( c(0, which(d1>0), length(d1)+1) )
+    
+    #Gather everything in a data.frame
+    N <- data.frame('Row'=idx.unique[,1], 'Col'=idx.unique[,2], 'Value'=N_ijk)
+    #print(N)
+    
+    #Sum the elements of each row to compute N_{ij}
+    Nj <- aggregate(.~Row,data=N,sum)[,c(3)]
+    
+    #Compute factorials
+    N$Value <- factorials[N$Value+1]  
+    logN <- aggregate(.~Row,data=N,sum)[,c(3)]
+    
+    #Compute the probability
+    factor.first  <- factorials[r]    #r_i-1+1
+    factor.second <- factorials[Nj+r] #+r_i -1 +1 (because of the indices)
+    factor.third  <- logN
+
+    result <- sum(factor.first - factor.second + factor.third)
+
+    return(result)
+}
+```
+
+```{r}
+# K2 algorithm implementation
+K2 <- function(database, u, ordering, debug=FALSE) {   
+    #' Implementation of K2 algorithm as specified by 
+    #' G. F. Cooper, E. Herskovits '"A Bayesian Method for the Induction of Probabilistic Networks from Data"
+    #'
+    #' Given a `database` of cases each containing n observations, and an `ordering` of the n variables,
+    #' the algorithm finds the bayesian network structure with the (approximately) maximum probability
+    #' of generating the observed data, by using at most `u` parents for each node i, which are chosen
+    #' only between the nodes j preceding i in the ordering.
+    #' 
+    #' @param database data.frame of size (m, n). Dataset containing m observations of n variables, with no missing values.
+    #' All values must be integers between 0 and r-1.
+    #' @param u Integer. Maximum number of parents for each node.
+    #' @param ordering Vector of size n OR list of n1 vectors of total size n
+    #' If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+    #' such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
+    #' (i.e. variables that "appear before it" in the provided ordering).
+    #' If list must contains the layers of the networks, representing the "prior" ordering of variables,
+    #' such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+    #' with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
+    #' @return matrix of size (n, n)
+    #' Adjacency matrix adj of the most probable Directed Acyclic Graph found given the evidence in the database.
+    #' adj[i,j] is 1 if there is a connection from node j to node i (i.e. if j is a parent of i) 
+    
+    m <- nrow(database)
+    n <- ncol(database)
+    
+    r <- max(database) + 1
+    factorials <- log.fact(m, r)
+    
+    adj <- matrix(data = 0, nrow = n, ncol = n)
+    
+    for (i in 1:n) {
+        i.parents <- c()
+        
+        log.p.old <- f(i, i.parents, database, r, factorials)
+        #log-Probability of a structure with i disconnected
+        
+        if (debug) cat('x', i, ' [], log(p) = ', log.p.old, '\n')
+        
+        OKToProceed <- TRUE
+        
+        #Determine which nodes can be parents of i
+        if (class(ordering)=='list'){ # Layer ordering, each element of the list is a layer
+            
+            for (h in 1:length(ordering)){
+               if (i %in% ordering[[h]] ){
+                   i.pos <- h
+                   break
+               } 
+            }
+            if( i.pos == 1){
+                next
+            } else {
+                i.parents.candidates <- unlist( ordering[1:i.pos-1] )
+            }
+        } else { # Normal ordering, the input is a vector
+            i.pos <- which(ordering == i) #Position of i in the ordering. Only variables before this position can be parents of i
+        
+            if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
+                next 
+            } else {
+                i.parents.candidates <- ordering[1:i.pos-1]
+            }
+        }
+    
+        #Add at most u nodes as parents of i,
+        #only if each one of them increases the structure's probability
+        while (OKToProceed & length(i.parents) < u) {
+            log.p.new <- -Inf
+            newparent.index <- NA
+            
+            #Select the node from the candidate list that maximizes the structure's probability (greedy algorithm)
+            for (candidate in i.parents.candidates) {
+                log.p.candidate <- f(i, c(i.parents, candidate), database, r, factorials)
+                
+                if (debug) cat('x', i, ' [', i.parents, ', +', candidate, '+], log(p) = ', log.p.candidate, '\n')
+                
+                if (log.p.candidate > log.p.new) {
+                    log.p.new <- log.p.candidate
+                    newparent.index <- candidate
+                }
+            }
+        
+            #Accept the new parent candidate only if it increases the total structure's probability
+            if (log.p.new > log.p.old) {
+                log.p.old <- log.p.new
+                i.parents <- c(i.parents, newparent.index)
+                
+                if (debug) cat(newparent.index, ' -> ', i, '\n')
+                adj[i, newparent.index] = 1
+                
+                #Remove the added parent from the candidates list
+                i.parents.candidates <- i.parents.candidates[-newparent.index]
+                
+                if (length(i.parents.candidates) == 0) { #If there are no more candidates to check, terminate
+                    OKToProceed <- FALSE
+                    if (debug) cat('\n---\n')
+                }
+            } else { #If probability does not increase, stop adding parents to i
+                OKToProceed <- FALSE
+                if (debug) cat('\n---\n')
+            }
+        }
+    }
+    
+    return(adj)
+}
+```
+
+```{r}
+#Print the structure
+structure <- K2(df, 2, c(1,2,3), debug=TRUE)
+
+print(structure)
+
+#Should be:
+# [0, 0, 0]
+# [1, 0, 0]
+# [0, 1, 0]
+
+for (i in 1:nrow(structure)) {
+    cat("Node ", i, " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(j)
+        }
+    }
+    
+    cat("]\n")
+}
+```
+
+**Expected output** (also checked by hand)
+```text
+x 1  [], log(p) =  -7.927324 
+x 2  [], log(p) =  -7.927324 
+x 2  [ , + 1 +], log(p) =  -6.802395 
+1  ->  2 
+
+---
+x 3  [], log(p) =  -7.745003 
+x 3  [ , + 1 +], log(p) =  -7.495542 
+x 3  [ , + 2 +], log(p) =  -5.192957 
+2  ->  3 
+x 3  [ 2 , + 1 +], log(p) =  -5.991465 
+
+---
+     [,1] [,2] [,3]
+[1,]    0    0    0
+[2,]    1    0    0
+[3,]    0    1    0
+Node  1  : []
+Node  2  : [1]
+Node  3  : [2]```
+
+
+# Performance tests
+
+
+We have analyzed the algorithm from a theoretical point of view and tried it on a simple database to understand how it works. Now we want to test it even further: we will use different datasets obtained from  the bnlearn website (https://www.bnlearn.com/bnrepository/). This resource gives us also the correct network structure, such that we can be sure of the performances of our algorithm.
+
+
+## Examples
+
+### Learning test
+This dataset is a simple dataset used by the bnlearn author to test its algorithms. However it is quite interesting in our case: we have $6$ variable, where the first 5 variables are with $3$-levels and the last one with only $2$ levels. We will understand if our implementation of K$2$ is able to manage non-binary variables and also datasets with variables with different values.
+
+```{r}
+from_str_to_num <- function(data){
+    # Parameters:
+    # - data: data.frame of string factors
+    # Output:
+    # - data.num: data.frame of numeric factors
+    data.num <- data.frame(sapply(data, as.numeric)-1) 
+    # -1 is needed for our convention with the levels starting from 0
+    return(data.num)
+    }
+```
+
+```{r}
+lt.data <- from_str_to_num(learning.test)
+lt.names <- colnames(lt.data)
+lt.struct <- K2(lt.data, 2, c(1,3,6,2,4,5))
+head(lt.data)
+```
+
+```{r}
+# Notice that our convention for the adjacency matrix is the transpose of the usual one.
+# This means that before the plotting we must apply t(adj)
+lt.net <- graph_from_adjacency_matrix(t(lt.struct), mode="directed")
+plot(lt.net, vertex.label = lt.names, main='Learning test network')
+```
+
+Notice that the correct order is:
+$$
+[A][C][F][B|A][D|A,C][E|B,F]
+$$
+where we identify with $[\cdot]$ a node with no parents and $[i|j]$ when node $i$ has node $j$ as parent. The order recovered from our algorithm is exactly the original one.
+
+
+### Lizards
+Lizard is a real dataset containing the species, the perch height and the perch diameter of different lizards. It only has three two-level variables, but it is indeed an important test since it is the first attempt to use $K2$ on real world data.
+
+Sources: <br>
+Schoener TW (1968). "The Anolis Lizards of Bimini: Resource Partitioning in a Complex Fauna". Ecology, 49(4):704–726.
+
+```{r}
+lz.data <- from_str_to_num(lizards)
+lz.names <- colnames(lz.data)
+lz.struct <- K2(lz.data, 2, c(1,2,3))
+head(lz.data)
+```
+
+```{r}
+lz.net <- graph_from_adjacency_matrix( t(lz.struct), mode="directed")
+plot(lz.net, vertex.label = lz.names, main='Lizards network')
+```
+
+The result is meaningful: height and diameter depends on the species. This is indeed also the right result, in fact the correct order is:
+$$
+[Species][Diameter|Species][Height|Species]
+$$
+
+
+### Alarm
+Alarm is a famous dataset used as testbench for structure building algorithms: it has $37$ variables that can be at most 4-level. In particular it has a layered structure, that let us understand the differences between using a layered and not-layered order in the hypothesis of $K2$
+
+```{r}
+al.data <- from_str_to_num(alarm)
+al.names <- colnames(al.data)
+
+order <- c(18, 20, 3, 9, 15, 23, 36, 21, 19, 17, 16, 30, 11, 35, 22, 29, 
+           2, 24, 0, 1, 27, 25, 12, 34, 14, 33, 31, 10, 32, 13, 26, 28, 6, 5, 7, 8, 4)+1
+
+layered <- list( c(16, 24, 22, 21,23, 12, 19, 20, 18, 17, 30, 28), 
+                c(37, 10, 31, 4, 3, 25, 26), c(36, 2, 1), c(13, 35), c(34, 15),
+               c(33, 32), c(11, 14), c(27), c(29), c(7, 6, 9, 8), c(5))
+
+al.struct <- K2(al.data, 4, order)
+al.lay.struct <- K2(al.data, 4, layered)
+head(al.data)
+```
+
+```{r}
+al.diff <- sum(abs(al.struct-al.lay.struct))
+cat('Number of different arcs between the two structures:', al.diff, '\n')
+```
+
+```{r}
+# True graph
+modelstring = paste0("[HIST|LVF][CVP|LVV][PCWP|LVV][HYP][LVV|HYP:LVF][LVF]",
+  "[STKV|HYP:LVF][ERLO][HRBP|ERLO:HR][HREK|ERCA:HR][ERCA][HRSA|ERCA:HR][ANES]",
+  "[APL][TPR|APL][ECO2|ACO2:VLNG][KINK][MINV|INT:VLNG][FIO2][PVS|FIO2:VALV]",
+  "[SAO2|PVS:SHNT][PAP|PMB][PMB][SHNT|INT:PMB][INT][PRSS|INT:KINK:VTUB][DISC]",
+  "[MVS][VMCH|MVS][VTUB|DISC:VMCH][VLNG|INT:KINK:VTUB][VALV|INT:VLNG]",
+  "[ACO2|VALV][CCHL|ACO2:ANES:SAO2:TPR][HR|CCHL][CO|HR:STKV][BP|CO:TPR]")
+dag = model2network(modelstring)
+
+adj <- amat(dag) 
+adj <- adj[al.names, al.names] # Reordering the adjacency matrix with our column order
+```
+
+```{r}
+# Checking for errors: notice that we have to transpose our matrix
+al.norm.diff <- sum(abs(t(al.struct)-adj))
+al.lay.diff <- sum(abs(t(al.lay.struct)-adj))
+
+cat('Number of different arcs between the normal K2 and the true network:', al.norm.diff, '\n')
+cat('Number of different arcs between the layered K2 and the true network:', al.lay.diff, '\n')
+```
+
+```{r}
+al.net <- graph_from_adjacency_matrix( t(al.struct), mode="directed")
+al.lay.net <- graph_from_adjacency_matrix( t(al.lay.struct), mode="directed")
+
+par(mfrow = c(1,2))
+plot(al.net, vertex.label = al.names, main='Alarm normal network ')
+plot(al.lay.net, vertex.label = al.names, main='Alarm layered network')
+```
+
+Analyzing the result we see that our algorithm gives optimal results also for a complex network such as ALARM. We also see that, in a network with a layered structure as ALARM using it improves the performances, bringing us to the same number of errors as the paper of $K2$.
+
+
+## Scaling
+We want to analyze now how the computational time of the algorithm scales with its parameters: 
+- the number of samples $m$;
+- the number of variables $n$;
+
+### Number of samples
+We use ALARM for this analysis.
+
+```{r}
+m.max <- nrow(al.data)
+M <- seq(2000, m.max, by=2000)
+m.times <- rep(0, 20)
+
+for(i in 1:length(M)){
+    t.start <- Sys.time()
+    
+    al.struct <- K2(al.data[1:M[i], ], 4, order)
+    
+    t.stop <- Sys.time()
+    
+    
+    m.times[i] <- as.numeric(difftime(t.stop, t.start, units="secs"))
+}
+```
+
+```{r}
+plot(M, m.times[m.times > 0], pch=20, main = 'Time scaling wrt the number of samples',
+    xlab='Number of samples m', ylab='Computational time [s]', col='navy', cex=2)
+```
+
+We see a linear scaling with $m$, that is what we wanted.
+
+
+### Number of variables 
+
+We fix $m$ to the minimum $m$ among the three databases studied, and so to $m_{min}=m_{liz}=409$.
+
+```{r}
+N <- c(3, 6, 37)
+
+n.times <- rep(0, 3)
+m.min <- nrow(lz.data)
+
+t.start <- Sys.time()
+lz.struct <- K2(lz.data, 2, c(1,2,3))
+t.stop <- Sys.time()
+n.times[1] <- as.numeric(difftime(t.stop, t.start, units="secs"))
+
+t.start <- Sys.time()
+lt.struct <- K2(lt.data[1:m.min, ], 2, c(1,3,6,2,4,5))
+t.stop <- Sys.time()
+n.times[2] <- as.numeric(difftime(t.stop, t.start, units="secs"))
+
+t.start <- Sys.time()
+al.struct <- K2(al.data[1:m.min, ], 4, order)
+t.stop <- Sys.time()
+n.times[3] <- as.numeric(difftime(t.stop, t.start, units="secs"))
+```
+
+```{r}
+plot(N, n.times, pch=20, main = 'Time scaling wrt the number of variables',
+    xlab='Number of variables n', ylab='Computational time [s]', col='navy', cex=2)
+```
+
+We have too few samples to actually make a reliable analysis. Nevertheless we can guess that the relation is not linear, and this is in agreement with the paper where it was found a quartic relation.
+
+
+# Bnstruct
+Bnstruct is an R package developed by Francesco Sambo and Alberto Franzin that provides objects and methods for learning the structure and parameters of a Bayesan Network in various situations, such as the presence of missing data.
+
+One of the most important feature of Bnstruct is the possibility of performing *imputation*, with which we infer the missing data using a k-Nearest Neighbor algorithm.
+
+It provides $5$ different algorithms for the structure learning:
+- Silander-Myllymaki (sm), which is an exact, and so really slow, method;
+- Max-Min Parent-and-Children, a constraint-based heuristic approach that discovers only the presence of edges but not their directionality;
+- Hill Climbing method, another heuristic method;
+- Max-Min Hill-Climbing (default one), which is a combination of the previous two, discovering first the skeleton of the network and then performing a greedy evaluation to find the directionality;
+- Structural Expectation-Maximization (sem), for learning from a network with missing values.
+
+Our goal is to code a wrapper for our $K2$ algorithm, such that it can be used in BNstruct. In particular we want that:
+- It takes as input a BNdatasets;
+- Gives as output a BN object with the correct adjacency matrix.
+
+```{r}
+bnstruct.K2 <- function(data.bn, max.parents, ordering){
+    #' Wrapper for the K2 algorithm and the bnstruct package
+    #'
+    #' Applies the K2 algorithm to the bnstruct dataset `data.bn`, finding the (approximately)
+    #' maximally likely structure given the initial node `ordering` and the maximum number of parents
+    #' `max.parents`.
+    #'
+    #' @param data.bn BNdataset
+    #'  Dataset with the format of the BNstruct package. It contains m samples from n variables. Can contain missing data.
+    #' @param max.parents Integer
+    #'  Maximum number of parents for a given node
+    #' @param ordering Vector of size n or list of n1 vectors of total size n
+    #'  If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+    #'  such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
+    #'  (i.e. variables that "appear before it" in the provided ordering).
+    #'  If list must contains the layers of the networks, representing the "prior" ordering of variables,
+    #'  such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+    #'  with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
+    #' @return net BN object containing the input dataset and the adjacency matrix computed with K2
+    
+    if( has.imputed.data( data.bn)) # Pick imputed data if possible
+        data <- data.frame( imputed.data( data.bn) - 1 )
+    else{
+        data <- complete(data.bn) # Else eliminate missing data
+        data <- data.frame( data@raw.data - 1 ) 
+    }
+    adj.matrix <- K2(data, max.parents, ordering) # Performing K2 algorithm
+        
+    net <- BN(data.bn) # Creating BN object with the input data
+    net@dag <- t(adj.matrix) # Defining the BN adjacency matrix (Notice the t() )
+    
+    return(net) 
+}
+```
+
+We make now some examples of use using the two datasets provided with BNstruct.
+
+We start with Asia, a small dataset about lung disease and visits to Asia.
+
+```{r}
+asia.data <- asia()
+asia.names <- asia.data@variables
+asia.struct <- bnstruct.K2(asia.data, 2, list(c( 1, 3), c(2, 4), c(6, 5), c(7,8) ) )
+```
+
+```{r}
+asia.net <- graph_from_adjacency_matrix(asia.struct@dag, mode="directed")
+plot(asia.net, vertex.label = asia.names, main='Asia network')
+```
+
+The results with the analysis are not the best ones, in fact there some errors. However the documentation of BNlearn states that standard learning algorithms are not able to recover the true structure of the Asia network because of the presence of a node (E) with conditional probabilities equal to both 0 and 1. The correct structure would be:
+$$
+[A][S][T|A][L|S][B|S][D|B,E][E|T,L][X|E]
+$$
+Nevertheless our test is a success, since we are able to apply our algorithm directly to a dataset in the format used by BNstruct.
+
+We proceed to understand if it can also be used with datasets with imputed/missing data, using the child dataset.
+
+```{r}
+ch.data <- child()
+ch.data <- impute(ch.data)
+ch.names <- ch.data@variables
+ch.order <- list( c(8), c(2), c(5, 6, 7, 9, 1, 4), c(3, 10:15), c(16:20))
+
+ch.struct <- bnstruct.K2(ch.data, 2, ch.order )
+```
+
+```{r}
+ch.net <- graph_from_adjacency_matrix(ch.struct@dag, mode="directed")
+plot(ch.net, vertex.label = ch.names, main='Child network')
+```
+
+The only links that are missing from the ones presented in the paper are:
+- CardiacMixing -> HypDistrib
+- LungParench -> HypoxianO2
+- Disease -> BirthAsphyxia
+
+We so commit only 3 errors, which is a good result for a greedy algorithm.
+
+We can conclude that we are able to proceed also in the case of an imputed dataset.
