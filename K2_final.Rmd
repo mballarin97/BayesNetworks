@@ -53,7 +53,7 @@ log.fact <- function(m, r){
 ```
 
 The following function computes:
-$$f(i, \mathbf{\pi_i}) = \prod_{j=1}^{q_i} \frac{(r_i - 1)!}{(N_{ij} + r_i - 1)!} \prod_{k=1}^{r_i} N_{ijk} $$
+$$ \log f(i, \pi_i) = \sum_{j=1}^{q_i} \Big[ \log (r_i - 1)! - \log (N_{ij} + r_i - 1)!  + \sum_{k=1}^{r_i} \log N_{ijk}! \Big]$$
 where:
 - $r_i$ is the number of values that the $i$-th variable ($x_i$) can assume (e.g. $x_i \in \{0,1\} \Rightarrow r_i = 2$
 - $\mathbf{\pi_i}$ contains the indices of the parents of $i$ (e.g. if $x_2, x_3 \rightarrow x_i$ in the DAG, then $\mathbf{\pi_i} = (1,2)$)
@@ -65,7 +65,7 @@ where:
 f <- function(i, i.parents, database, r, factorials) {
     #' Computes the function f
     #'
-    #' Returns the joint probability that node i has parents i.parents, and that this bayesian network 
+    #' Returns the joint (log)probability that node i has parents i.parents, and that this bayesian network 
     #' has produced all the cases observed in database.
     #'
     #' @param i Integer. Represents a node.
@@ -119,7 +119,7 @@ f <- function(i, i.parents, database, r, factorials) {
     
     #To compute repetitions, we add an element at the boundaries (start and end)
     #and take the differences of the indices of non-zero values
-    N_ijk <- diff( c(0,which(d1>0), length(d1)+1) )
+    N_ijk <- diff( c(0, which(d1>0), length(d1)+1) )
     
     #Gather everything in a data.frame
     N <- data.frame('Row'=idx.unique[,1], 'Col'=idx.unique[,2], 'Value'=N_ijk)
@@ -145,15 +145,6 @@ f <- function(i, i.parents, database, r, factorials) {
 
 ```{r}
 # K2 algorithm implementation
-
-# Parameters:
-# - database : 
-# - u : integer
-#   Maximum number of parents for each node.
-# - ordering : 
-# Output:
-# adj : 
-
 K2 <- function(database, u, ordering) {   
     #' Implementation of K2 algorithm as specified by 
     #' G. F. Cooper, E. Herskovits '"A Bayesian Method for the Induction of Probabilistic Networks from Data"
