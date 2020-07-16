@@ -1,0 +1,313 @@
+---
+jupyter:
+  jupytext:
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.3.2
+  kernelspec:
+    display_name: R
+    language: R
+    name: ir
+---
+
+```{r}
+#Install needed packages
+#install.packages("docstring")
+```
+
+```{r}
+library(docstring)
+```
+
+```{r}
+# Sample dataset D
+# (x1, x2, x3) are binary variables
+x1 <- c(1, 1, 0, 1, 0, 0, 1, 0, 1, 0)
+x2 <- c(0, 1, 0, 1, 0, 1, 1, 0, 1, 0)
+x3 <- c(0, 1, 1, 1, 0, 1, 1, 0, 1, 0)
+df <- data.frame(x1, x2, x3)
+```
+
+```{r}
+log.fact <- function(m, r){
+    #' Precompute log of factorials from 0 to m+r-1
+    #'
+    #' `log.fact` returns an array `a` of m+r elements, such that `a[i+1] = log(i!)`
+    #'
+    #' @param m Integer
+    #' @param r Integer
+    #' @return Numeric vector of size `m+r`, such that the (i+1)-th element contains log(i!).
+    #'
+    #' @examples
+    #' log.fact(2, 3)
+    
+    fact <- log( c(1, 1:(m+r-1)) )
+
+    for (i in 4:length(fact)) { #0! = 1, 1! = 1, 2! = 2, so they are already correct
+        fact[i] <- fact[i] + fact[i-1]
+    }
+    return(fact)
+}
+```
+
+The following function computes:
+$$f(i, \mathbf{\pi_i}) = \prod_{j=1}^{q_i} \frac{(r_i - 1)!}{(N_{ij} + r_i - 1)!} \prod_{k=1}^{r_i} N_{ijk} $$
+where:
+- $r_i$ is the number of values that the $i$-th variable ($x_i$) can assume (e.g. $x_i \in \{0,1\} \Rightarrow r_i = 2$
+- $\mathbf{\pi_i}$ contains the indices of the parents of $i$ (e.g. if $x_2, x_3 \rightarrow x_i$ in the DAG, then $\mathbf{\pi_i} = (1,2)$)
+- $q_i$ is the number of possible values that the variables in $\mathbf{\pi_i}$ can take. For example, if $\mathbf{\pi_i} = (1,2)$, and both $x_1$ and $x_2$ are binary, then $q_i = 2^2$, since $(x_1, x_2) \in \{(0,0), (0,1), (1,0), (1,1)\}$. Treating the values of $x_j \in \mathbf{\pi_i}$ as digits of a binary number (or, in general, of a number in base $r = \max_j(r_j)$) defines a natural ordering for the possible values of $\mathbf{\pi_i}$.
+- $N_{ijk}$ is the number of cases in the database $D$ where $x_i$ assumes its $k$-th value, and $\mathbf{\pi_i}$ its $j$-th value.
+- $N_{ij} = \sum_{k=1}^{r_i} N_{ijk}$
+
+```{r}
+f <- function(i, i.parents, database, r, factorials) {
+    #' Computes the function f
+    #'
+    #' Returns the joint probability that node i has parents i.parents, and that this bayesian network 
+    #' has produced all the cases observed in database.
+    #'
+    #' @param i Integer. Represents a node.
+    #' @param i.parents Vector of integers. Parents of i. Should not contain i itself.
+    #' @param database data.frame of size (m,n) with all integer values between 0 and r-1. Observed cases.  
+    #' @param r Integer. Number of possible values a single observation in database can assume.
+    #' @param factorials Numeric vector. Precomputed log(factorial(i)) for i from 0 to m+r-1 (see log.fact function)
+    #' @return Numeric. Probability that i has i.parents as parents, and that this structure results
+    #' in the observed database.
+    
+    parents.length <- length(i.parents)
+    m <- nrow(database)
+    
+    #From each row of database we compute the indices j and k
+    
+    #k: value of the i-th variable (database[i]) + 1
+    #+1 is needed because indices in R start from 1, and database contains values 0:r-1
+    index.k <- database[i] + 1
+    
+    #j: take values of database[i.parents], and treat them as digits of a number in base r 
+    #(then add 1 to account for R indices)
+    todec <- r ** (0:max(0,parents.length-1)) 
+    
+    if (parents.length > 0)
+        index.j <- as.matrix(database[i.parents])%*%todec + 1
+    else 
+        index.j <- rep(1,m)
+
+    #Gather the indices in a matrix
+    indexes <- cbind(index.j, index.k) 
+    
+    #Sort
+    indexes <- indexes[ order(indexes[,1], indexes[,2]),  ]
+    
+    #Now indexes is a sequence of "ordered blocks of rows", e.g.
+    # indexes <- [[1, 1], [1, 2], [1, 2], [2, 1], [2, 2]]
+    #We want to count the length of each block (i.e. number of "repetitions" of each row)
+    #By taking the differences between each row and the previous one:
+    d <- abs( diff( as.matrix(indexes) ) )
+    #the only rows with non-zero elements are the ones at the "boundaries" of blocks
+    
+    #The example from before leads to:
+    #d <- [[0, 1], [0, 0], [1, 1], [0, 1]]
+    
+    #Sum columns to reduce the matrix to a vector:
+    d1 <- d[,1] + d[,2]
+    #d1 <- [1, 0, 2, 1]
+    
+    #The unique rows are the ones with non-zero values + the last one
+    idx.unique <- indexes[c(which(d1>0), length(d1)+1), ]
+    
+    #To compute repetitions, we add an element at the boundaries (start and end)
+    #and take the differences of the indices of non-zero values
+    N_ijk <- diff( c(0,which(d1>0), length(d1)+1) )
+    
+    #Gather everything in a data.frame
+    N <- data.frame('Row'=idx.unique[,1], 'Col'=idx.unique[,2], 'Value'=N_ijk)
+    #print(N)
+    
+    #Sum the elements of each row to compute N_{ij}
+    Nj <- aggregate(.~Row,data=N,sum)[,c(3)]
+    
+    #Compute factorials
+    N$Value <- factorials[N$Value+1]  
+    logN <- aggregate(.~Row,data=N,sum)[,c(3)]
+    
+    #Compute the probability
+    factor.first  <- factorials[r]    #r_i-1+1
+    factor.second <- factorials[Nj+r] #+r_i -1 +1 (because of the indices)
+    factor.third  <- logN
+
+    result <- sum(factor.first - factor.second + factor.third)
+
+    return(result)
+}
+```
+
+```{r}
+# K2 algorithm implementation
+
+# Parameters:
+# - database : 
+# - u : integer
+#   Maximum number of parents for each node.
+# - ordering : 
+# Output:
+# adj : 
+
+K2 <- function(database, u, ordering) {   
+    #' Implementation of K2 algorithm as specified by 
+    #' G. F. Cooper, E. Herskovits '"A Bayesian Method for the Induction of Probabilistic Networks from Data"
+    #'
+    #' Given a `database` of cases each containing n observations, and an `ordering` of the n variables,
+    #' the algorithm finds the bayesian network structure with the (approximately) maximum probability
+    #' of generating the observed data, by using at most `u` parents for each node i, which are chosen
+    #' only between the nodes j preceding i in the ordering.
+    #' 
+    #' @param database data.frame of size (m, n). Dataset containing m observations of n variables, with no missing values.
+    #' All values must be integers between 0 and r-1.
+    #' @param u Integer. Maximum number of parents for each node.
+    #' @param ordering Vector of size n OR list of n1 vectors of total size n
+    #' If vector must contain a valid permutation of the integers [1, 2 ... n], representing the "prior" ordering of variables,
+    #' such that the variable with index ordering[i] can have as possible parents only variables with index ordering[j] with j < i
+    #' (i.e. variables that "appear before it" in the provided ordering).
+    #' If list must contains the layers of the networks, representing the "prior" ordering of variables,
+    #' such that the variable with index ordering[[i]] can have as possible parents only variables in the previous layers, and so
+    #' with index ordering[[j]] with j<i. Notice that n1<=n, and if it is equal we come back to the previous case. 
+    #' @return matrix of size (n, n)
+    #' Adjacency matrix adj of the most probable Directed Acyclic Graph found given the evidence in the database.
+    #' adj[i,j] is 1 if there is a connection from node j to node i (i.e. if j is a parent of i) 
+    
+    m <- nrow(database)
+    n <- ncol(database)
+    
+    r <- max(database) + 1
+    factorials <- log.fact(m, r)
+    
+    adj <- matrix(data = 0, nrow = n, ncol = n)
+    
+    debug <- TRUE
+    
+    for (i in 1:n) {
+        i.parents <- c()
+        
+        log.p.old <- f(i, i.parents, database, r, factorials)
+        #log-Probability of a structure with i disconnected
+        
+        if (debug) cat('x', i, ' [], log(p) = ', log.p.old, '\n')
+        
+        OKToProceed <- TRUE
+        
+        #Determine which nodes can be parents of i
+        if (class(ordering)=='list'){ # Layer ordering, each element of the list is a layer
+            
+            for (h in 1:length(ordering)){
+               if (i %in% ordering[[h]] ){
+                   i.pos <- h
+                   break
+               } 
+            }
+            if( i.pos == 1){
+                next
+            } else {
+                i.parents.candidates <- unlist( ordering[1:i.pos-1] )
+            }
+        } else { # Normal ordering, the input is a vector
+            i.pos <- which(ordering == i) #Position of i in the ordering. Only variables before this position can be parents of i
+        
+            if (i.pos == 1) { #If i is at the start of the ordering, there are no parents to check
+                next 
+            } else {
+                i.parents.candidates <- ordering[1:i.pos-1]
+            }
+        }
+    
+        #Add at most u nodes as parents of i,
+        #only if each one of them increases the structure's probability
+        while (OKToProceed & length(i.parents) < u) {
+            log.p.new <- -Inf
+            newparent.index <- NA
+            
+            #Select the node from the candidate list that maximizes the structure's probability (greedy algorithm)
+            for (candidate in i.parents.candidates) {
+                log.p.candidate <- f(i, c(i.parents, candidate), database, r, factorials)
+                
+                if (debug) cat('x', i, ' [', i.parents, ', +', candidate, '+], log(p) = ', log.p.candidate, '\n')
+                
+                if (log.p.candidate > log.p.new) {
+                    log.p.new <- log.p.candidate
+                    newparent.index <- candidate
+                }
+            }
+        
+            #Accept the new parent candidate only if it increases the total structure's probability
+            if (log.p.new > log.p.old) {
+                log.p.old <- log.p.new
+                i.parents <- c(i.parents, newparent.index)
+                
+                if (debug) cat(newparent.index, ' -> ', i, '\n')
+                adj[i, newparent.index] = 1
+                
+                #Remove the added parent from the candidates list
+                i.parents.candidates <- i.parents.candidates[-newparent.index]
+                
+                if (length(i.parents.candidates) == 0) { #If there are no more candidates to check, terminate
+                    OKToProceed <- FALSE
+                    if (debug) cat('\n---\n')
+                }
+            } else { #If probability does not increase, stop adding parents to i
+                OKToProceed <- FALSE
+                if (debug) cat('\n---\n')
+            }
+        }
+    }
+    
+    return(adj)
+}
+```
+
+```{r}
+#Print the structure
+structure <- K2(df, 2, c(1,2,3))
+
+print(structure)
+
+#Should be:
+# [0, 0, 0]
+# [1, 0, 0]
+# [0, 1, 0]
+
+for (i in 1:nrow(structure)) {
+    cat("Node ", i, " : [")
+    
+    for (j in 1:ncol(structure)) {
+        if (structure[i,j]) {
+            cat(j)
+        }
+    }
+    
+    cat("]\n")
+}
+```
+
+**Expected output** (also checked by hand)
+```text
+x 1  [], log(p) =  -7.927324 
+x 2  [], log(p) =  -7.927324 
+x 2  [ , + 1 +], log(p) =  -6.802395 
+1  ->  2 
+
+---
+x 3  [], log(p) =  -7.745003 
+x 3  [ , + 1 +], log(p) =  -7.495542 
+x 3  [ , + 2 +], log(p) =  -5.192957 
+2  ->  3 
+x 3  [ 2 , + 1 +], log(p) =  -5.991465 
+
+---
+     [,1] [,2] [,3]
+[1,]    0    0    0
+[2,]    1    0    0
+[3,]    0    1    0
+Node  1  : []
+Node  2  : [1]
+Node  3  : [2]```
